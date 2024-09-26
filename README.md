@@ -16,7 +16,7 @@ The NLST dataset metadata is availale at:
 `/scratch/project2/nlst-metadata/`
 
 Preprocessed NLST scans (compatabile with the included data loaders) are included at:
-`/scratch/project2/preprocessed/`
+`/scratch/project2/compressed/`
 
 Note, the scan's themselves are saved on local NVMe storage to accelerate your experiments IO. 
 

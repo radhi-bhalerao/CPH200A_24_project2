@@ -1,10 +1,16 @@
+import functools
+import operator
 import lightning.pytorch as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import LinearLR
 import torchmetrics
 import torchvision
+import torchvision.models as models
 from src.cindex import concordance_index
+from einops import rearrange
+
 
 class Classifer(pl.LightningModule):
     def __init__(self, num_classes=9, init_lr=1e-4):
@@ -13,7 +19,7 @@ class Classifer(pl.LightningModule):
         self.num_classes = num_classes
 
         # Define loss fn for classifier
-        self.loss = None
+        self.loss = nn.CrossEntropyLoss()
 
         self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=self.num_classes)
         self.auc = torchmetrics.AUROC(task="binary" if self.num_classes == 2 else "multiclass", num_classes=self.num_classes)
@@ -33,11 +39,10 @@ class Classifer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = self.get_xy(batch)
 
-        ## TODO: get predictions from your model and store them as y_hat
-        y_hat = None
-        raise NotImplementedError("Not implemented yet")
+        # get predictions from your model and store them as y_hat
+        y_hat = self.forward(x)
 
-        loss = None
+        loss = self.loss(y_hat, y)
 
         self.log('train_acc', self.accuracy(y_hat, y), prog_bar=True)
         self.log('train_loss', loss, prog_bar=True)
@@ -52,7 +57,9 @@ class Classifer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = self.get_xy(batch)
 
-        raise NotImplementedError("Not implemented yet")
+        y_hat = self.forward(x)
+
+        loss = self.loss(y_hat, y)
 
         self.log('val_loss', loss, sync_dist=True, prog_bar=True)
         self.log("val_acc", self.accuracy(y_hat, y), sync_dist=True, prog_bar=True)
@@ -65,7 +72,10 @@ class Classifer(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y = self.get_xy(batch)
-        raise NotImplementedError("Not implemented yet")
+
+        y_hat = self.forward(x)
+
+        loss = self.loss(y_hat, y)
 
         self.log('test_loss', loss, sync_dist=True, prog_bar=True)
         self.log('test_acc', self.accuracy(y_hat, y), sync_dist=True, prog_bar=True)
@@ -75,6 +85,7 @@ class Classifer(pl.LightningModule):
             "y": y
         })
         return loss
+    
     def on_train_epoch_end(self):
         y_hat = torch.cat([o["y_hat"] for o in self.training_outputs])
         y = torch.cat([o["y"] for o in self.training_outputs])
@@ -108,27 +119,180 @@ class Classifer(pl.LightningModule):
         self.test_outputs = []
 
     def configure_optimizers(self):
-        ## TODO: Define your optimizer and learning rate scheduler here (hint: Adam is a good default)
-        raise NotImplementedError("Not implemented yet")
-
-
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.init_lr)
+        scheduler = LinearLR(optimizer)
+        return [optimizer], [scheduler]
+    
+    def init_weights(m, nonlinearity='relu'):
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
+        elif isinstance(m, nn.Linear):
+            nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
+        
 
 class MLP(Classifer):
-    def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr = 1e-3, **kwargs):
+    def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr=1e-3, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
         self.hidden_dim = hidden_dim
         self.use_bn = use_bn
+        self.bn = [nn.BatchNorm1D(hidden_dim)] if self.use_bn else []
+        self.num_layers = num_layers
+
+        self.first_layer = nn.Sequential(nn.Linear(input_dim, self.hidden_dim),
+                                         *self.bn,
+                                         nn.ReLU())
+
+        self.hidden_layers = []
+        for _ in range(self.num_layers - 1):
+            self.hidden_layers.append(nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim),
+                                                    *self.bn,
+                                                    nn.ReLU())
+                                         )
+
+        self.final_layer = nn.Sequential(nn.Linear(self.hidden_dim, num_classes),    
+                                         nn.Softmax(dim=-1)
+                                         )
+
+        self.model = nn.Sequential(self.first_layer,
+                                   *self.hidden_layers,
+                                   self.final_layer
+                                   )
+        
+        self.model.apply(self.init_weights)
+
+    def forward(self, x):
+        batch_size, channels, width, height = x.size()
+        x = rearrange(x, 'b c w h -> b (w h c)')
+        return self.model(x)
 
 
-        raise NotImplementedError("Not implemented yet")
+class LinearModel(Classifer):
+    def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr=1e-3, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+
+        self.hidden_dim = hidden_dim
+        self.use_bn = use_bn
+        self.bn = [nn.BatchNorm1D(self.hidden_dim)] if self.use_bn else []
+        self.num_layers = num_layers
+
+        self.first_layer = nn.Sequential(nn.Linear(input_dim, self.hidden_dim),
+                                         *self.bn)
+
+        self.hidden_layers = []
+        for _ in range(self.num_layers - 1):
+            self.hidden_layers.append(nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim),
+                                                    *self.bn)
+                                         )
+
+        self.final_layer = nn.Sequential(nn.Linear(self.hidden_dim, num_classes),    
+                                         nn.Softmax(dim=-1)
+                                         )
+
+        self.model = nn.Sequential(self.first_layer,
+                                   *self.hidden_layers,
+                                   self.final_layer
+                                   )
+
+    def forward(self, x):
+        batch_size, channels, width, height = x.size()
+        x = rearrange(x, 'b c w h -> b (w h c)')
+        return self.model(x)
+
+
+class CNN(Classifer):
+    def __init__(self, input_dim=(3, 28, 28), hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr = 1e-3, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr) # TODO: check how input dim is set
+        self.save_hyperparameters()
+
+        self.hidden_dim = hidden_dim
+        self.use_bn = use_bn
+        self.bn_fc = [nn.BatchNorm1D(hidden_dim)] if self.use_bn else []
+        self.num_layers = num_layers
+
+        # initialize convolutional layers 
+        self.feature_extractor = []
+        for i in range(num_layers):
+            if i == 0: # first conv layer
+                in_channels = input_dim[0]
+                out_channels = 20
+                conv_layer = nn.Sequential([nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))],
+                                            nn.ReLU()
+                                            )
+            else: # subsequent conv layers
+                bn_conv = [nn.BatchNorm2D(out_channels)] if self.use_bn else []
+                conv_layer = nn.Sequential([nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                                            *bn_conv,
+                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))],
+                                            nn.ReLU()
+                                            )
+
+            self.feature_extractor.append(conv_layer)
+            
+            # set channels for i > 0
+            in_channels = out_channels
+            out_channels *= 2
+        
+        self.feature_extractor = nn.Sequential(*self.feature_extractor)
+
+        # get number of output features from conv layers
+        num_features_before_fc = functools.reduce(operator.mul, list(self.feature_extractor(torch.rand(1, *input_dim)).shape))
+            
+		# initialize fully connected layers
+        self.classifier = []
+        for i in range(num_layers):
+            in_features = num_features_before_fc if i == 0 else self.hidden_dim
+
+            if i == num_layers - 1: # add final fc layer
+                fc_layer = nn.Sequential(nn.Linear(in_features, num_classes),
+                                         nn.Softmax(dim=-1)
+                                         )
+                        
+            else: # add consequent fc layres
+                fc_layer = nn.Sequential(nn.Linear(in_features=in_features, out_features=self.hidden_dim),
+                                        *self.bn_fc,
+                                        nn.ReLU()
+                                        )
+        
+            self.classifier.append(fc_layer)
+        
+        self.classifier = nn.Sequential(*self.classifier)              
+
+    def forward(self, x):
+        batch_size, channels, width, height = x.size()
+        x = rearrange(x, 'b c w h -> b c h w')
+        x = self.feature_extractor(x).flatten(1)
+        return self.classifier(x)
+
+
+class ResNet18(Classifer):
+    def __init__(self, num_classes=9, init_lr=1e-3, pretraining=False, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+
+        # Initialize a ResNet18 model
+        backbone = models.resnet18(weights='DEFAULT')
+        num_filters = backbone.fc.in_features
+        layers = list(backbone.children())[:-1]
+
+        self.feature_extractor = nn.Sequential(*layers)
+
+        if not pretraining:
+            self.feature_extractor.apply(self.init_weights)
+
+        self.classifier = nn.Sequential(nn.Linear(num_filters, num_classes),    
+                                         nn.Softmax(dim=-1)
+                                         )
 
 
     def forward(self, x):
         batch_size, channels, width, height = x.size()
-        raise NotImplementedError("Not implemented yet")
-        return None
+        x = rearrange(x, 'b c w h -> b c h w')
+        x = self.feature_extractor(x).flatten(1)
+        return self.classifier(x)
 
 
 NLST_CENSORING_DIST = {
@@ -139,6 +303,7 @@ NLST_CENSORING_DIST = {
     "4": 0.9523590830936284,
     "5": 0.9461840310101468,
 }
+
 class RiskModel(Classifer):
     def __init__(self, input_num_chan=1, num_classes=2, init_lr = 1e-3, max_followup=6, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)

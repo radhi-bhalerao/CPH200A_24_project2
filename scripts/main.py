@@ -4,13 +4,16 @@ import sys
 from os.path import dirname, realpath
 
 sys.path.append(dirname(dirname(realpath(__file__))))
-from src.lightning import MLP, RiskModel
+from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
 
 NAME_TO_MODEL_CLASS = {
     "mlp": MLP,
+    "cnn": CNN,
+    "linear": LinearModel,
+    "resnet": ResNet18,
     "risk_model": RiskModel
 }
 
@@ -25,13 +28,15 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        help="Name of model to use. Options include: mlp, cnn, resnet",
+        choices=["mlp", "linear", "cnn", "resnet", "risk_model"],
+        help="Name of model to use",
     )
 
     parser.add_argument(
         "--dataset_name",
         default="pathmnist",
-        help="Name of dataset to use. Options: pathmnist, nlst"
+        choices=["pathmnist", "nlst"],
+        help="Name of dataset to use"
     )
 
     parser.add_argument(
@@ -57,6 +62,41 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         default=False,
         action="store_true",
         help="Whether to train the model."
+    )
+
+    parser.add_argument(
+        "--num_layers",
+        default=1,
+        type=int,
+        help="Depth of the model (number of layers)",
+    )
+
+    parser.add_argument(
+        "--use_bn",
+        default=False,
+        type=bool,
+        help="Whether to batch normalize in each layer",
+    )
+
+    parser.add_argument(
+        "--hidden_dim",
+        default=512,
+        type=int,
+        help="The dimension of the hidden layer(s)"
+    )
+
+    parser.add_argument(
+        "--use_data_augmentation",
+        default=False,
+        type=bool,
+        help="Whether to augment the data"
+    )
+
+    parser.add_argument(
+        "--pretraining",
+        default=False,
+        type=bool,
+        help="Whether to use pretrained model weights (only used for resnet)"
     )
 
     return parser
@@ -86,7 +126,6 @@ def main(args: argparse.Namespace):
     datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**vars(args[args.dataset_name]))
 
     print("Initializing model")
-    ## TODO: Implement your deep learning methods
     if args.checkpoint_path is None:
         model = NAME_TO_MODEL_CLASS[args.model_name](**vars(args[args.model_name]))
     else:

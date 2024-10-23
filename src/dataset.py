@@ -1,5 +1,6 @@
 import lightning.pytorch as pl
 import torchvision
+from torchvision.transforms import v2
 import medmnist
 import torch
 import torchio as tio
@@ -32,13 +33,18 @@ class PathMnist(pl.LightningDataModule):
             Prepare data transforms for train and test data.
             Note, you may want to apply data augmentation (see torchvision) for the train data.
         '''
+        # TODO: should we add normalization to transforms (across train set, by pixel)?
         self.test_transform = torchvision.transforms.Compose([
             torchvision.transforms.ToTensor()
         ])
         if self.use_data_augmentation:
-            # TODO: Implement some data augmentatons
-            self.train_transform = None
-            raise NotImplementedError("Not implemented yet")
+            self.train_transform = torchvision.transforms.Compose([
+                v2.RandomHorizontalFlip(p=0.15),
+                v2.RandomVeritcalFlip(p=0.15),
+                v2.RandomAutocontrast(p=0.15),
+                v2.RandomRotation(p=0.15),
+                torchvision.transforms.ToTensor()
+            ])
         else:
             self.train_transform = torchvision.transforms.Compose([
                 torchvision.transforms.ToTensor()
@@ -65,6 +71,7 @@ class PathMnist(pl.LightningDataModule):
 
 VOXEL_SPACING = (0.703125, 0.703125, 2.5)
 CACHE_IMG_SIZE = [256, 256]
+
 class NLST(pl.LightningDataModule):
     """
         Pytorch Lightning DataModule for NLST dataset. This will load the dataset, as used in https://ascopubs.org/doi/full/10.1200/JCO.22.01345.
@@ -349,5 +356,3 @@ class NLST_Dataset(torch.utils.data.Dataset):
         num_cancer = sum([d['y'] for d in self.dataset])
         num_cancer_year_1 = sum([d['y_seq'][0] for d in self.dataset])
         return "NLST Dataset. {} exams ({} with cancer in one year, {} cancer ever) from {} patients".format(len(self.dataset), num_cancer_year_1, num_cancer, num_patients)
-
-#%%

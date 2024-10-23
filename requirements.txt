@@ -10,3 +10,4 @@ tqdm
 lightning[pytorch-extra]
 lifelines
 joblib
+einops

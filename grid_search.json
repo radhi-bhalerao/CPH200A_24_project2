@@ -1,0 +1,20 @@
+{ "num_layers": [
+      1, 2, 3
+    ],
+    "use_bn": [
+      "True", "False"
+    ],
+    "use_data_augmentation": [
+      "True", "False"
+    ],
+    "hidden_dim": [
+      512, 256, 128
+    ],
+    "pretraining": [
+      "True", "False"
+    ],
+    "model_name": [
+      "mlp", "linear", "cnn", "resnet"
+    ]
+}
+

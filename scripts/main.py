@@ -197,7 +197,7 @@ def main(args: argparse.Namespace):
 
     print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
 
-    # re-init trainer for evaluation, per 
+    # re-init trainer for evaluation, per lightning recommendation
     trainer_args.update({'devices': 1})
     trainer = pl.Trainer(**trainer_args)
 
@@ -207,7 +207,7 @@ def main(args: argparse.Namespace):
     print("Evaluating model on test set")
     trainer.test(model, datamodule)
 
-    logger.finalize()
+    logger.finalize('success')
     wandb.finish()
 
     print("Done")

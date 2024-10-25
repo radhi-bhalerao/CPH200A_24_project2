@@ -191,6 +191,12 @@ def main(args: argparse.Namespace):
             dirpath=dirpath,
             filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
             save_last=True
+        ),
+        pl.callbacks.EarlyStopping(
+            monitor=args.monitor_key,
+            mode='min' if "loss" in args.monitor_key else "max",
+            patience=10,
+            check_on_train_epoch_end=True
         )]
 
     # init trainer

@@ -13,8 +13,19 @@
     "pretraining": [
       "True", "False"
     ],
-    "model_name": [
-      "mlp", "linear", "cnn", "resnet"
-    ]
+    "args_by_model_name": {
+      "mlp": [
+        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
+      ],
+      "linear": [
+        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
+      ],
+      "cnn": [
+        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
+      ],
+      "resnet": [
+        "pretraining"
+      ]
+    }
 }
 

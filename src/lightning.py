@@ -11,6 +11,7 @@ import torchvision.models as models
 from src.cindex import concordance_index
 from einops import rearrange
 
+torch.manual_seed(1)
 
 class Classifer(pl.LightningModule):
     def __init__(self, num_classes=9, init_lr=1e-4):
@@ -204,7 +205,7 @@ class LinearModel(Classifer):
 
 class CNN(Classifer):
     def __init__(self, input_dim=(3, 28, 28), hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr = 1e-3, **kwargs):
-        super().__init__(num_classes=num_classes, init_lr=init_lr) # TODO: check how input dim is set
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
         self.hidden_dim = hidden_dim

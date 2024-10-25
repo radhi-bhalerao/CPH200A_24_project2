@@ -219,17 +219,17 @@ class CNN(Classifer):
             if i == 0: # first conv layer
                 in_channels = input_dim[0]
                 out_channels = 20
-                conv_layer = nn.Sequential([nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
-                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))],
-                                            nn.ReLU()
+                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                                           nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+                                           nn.ReLU()
                                             )
             else: # subsequent conv layers
                 bn_conv = [nn.BatchNorm2D(out_channels)] if self.use_bn else []
-                conv_layer = nn.Sequential([nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
-                                            *bn_conv,
-                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))],
-                                            nn.ReLU()
-                                            )
+                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                                           *bn_conv,
+                                           nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
+                                           nn.ReLU()
+                                           )
 
             self.feature_extractor.append(conv_layer)
             

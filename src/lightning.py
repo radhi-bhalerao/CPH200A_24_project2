@@ -12,7 +12,7 @@ import torchvision.models as models
 from src.cindex import concordance_index
 from einops import rearrange
 
-seed_everything(1)
+seed_everything(2)
 
 class Classifer(pl.LightningModule):
     def __init__(self, num_classes=9, init_lr=1e-4):

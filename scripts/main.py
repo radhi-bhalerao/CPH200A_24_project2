@@ -3,9 +3,8 @@ import math
 import argparse
 import sys
 import os
-from os.path import dirname, realpath, isdir
 
-sys.path.append(dirname(dirname(realpath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
@@ -175,7 +174,7 @@ def main(args: argparse.Namespace):
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)
-    if not isdir(dirpath):
+    if not os.path.isdir(dirpath):
         os.makedirs(dirpath)
 
     args.trainer.callbacks = [

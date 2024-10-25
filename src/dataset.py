@@ -13,6 +13,12 @@ import os
 from collections import Counter
 import pickle
 
+dirname = os.path.dirname(__file__)
+root_dir = os.path.join(dirname, '../data')
+if not os.path.isdir(root_dir):
+    os.makedirs(root_dir)
+
+
 class PathMnist(pl.LightningDataModule):
     """
         Pytorch Lightning DataModule for PathMnist dataset. This will download the dataset, prepare data loaders and apply
@@ -51,14 +57,14 @@ class PathMnist(pl.LightningDataModule):
             ])
 
     def prepare_data(self):
-        medmnist.PathMNIST(root='../data', split='train', download=True, transform=self.train_transform)
-        medmnist.PathMNIST(root='../data', split='val', download=True, transform=self.test_transform)
-        medmnist.PathMNIST(root='../data', split='test', download=True, transform=self.test_transform)
+        medmnist.PathMNIST(root=root_dir, split='train', download=True, transform=self.train_transform)
+        medmnist.PathMNIST(root=root_dir, split='val', download=True, transform=self.test_transform)
+        medmnist.PathMNIST(root=root_dir, split='test', download=True, transform=self.test_transform)
 
     def setup(self, stage=None):
-        self.train = medmnist.PathMNIST(root='../data', split='train', download=True, transform=self.train_transform)
-        self.val = medmnist.PathMNIST(root='../data', split='val', download=True, transform=self.test_transform)
-        self.test = medmnist.PathMNIST(root='../data', split='test', download=True, transform=self.test_transform)
+        self.train = medmnist.PathMNIST(root=root_dir, split='train', download=True, transform=self.train_transform)
+        self.val = medmnist.PathMNIST(root=root_dir, split='val', download=True, transform=self.test_transform)
+        self.test = medmnist.PathMNIST(root=root_dir, split='test', download=True, transform=self.test_transform)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, pin_memory=True)

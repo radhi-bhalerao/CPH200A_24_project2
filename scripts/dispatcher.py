@@ -84,7 +84,7 @@ def launch_experiment(args: argparse.Namespace, experiment_config: dict) ->  dic
     d.update({k: v for k, v in vars(args).items() if k in d})
     
     # update model namespace args
-    model_d = vars(d[train_model_args[experiment_config['model_name']]])
+    model_d = vars(d[d[experiment_config['model_name']]])
     model_d.update({k: v for k, v in experiment_config.items() if k in model_d})
     
     # run experiment

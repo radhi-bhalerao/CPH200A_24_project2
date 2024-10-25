@@ -25,6 +25,7 @@ NAME_TO_DATASET_CLASS = {
     "nlst": NLST
 }
 
+dirname = os.path.dirname(__file__)
 
 def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
@@ -172,15 +173,16 @@ def main(args: argparse.Namespace):
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
 
-    dir_path = os.path.join('models', args.model_name)
-    if not isdir(dir_path):
-        os.makedirs(dir_path)
+    # set checkpoint save directory
+    dirpath = os.path.join(dirname, '../models', args.model_name)
+    if not isdir(dirpath):
+        os.makedirs(dirpath)
 
     args.trainer.callbacks = [
         pl.callbacks.ModelCheckpoint(
             monitor=args.monitor_key,
             mode='min' if "loss" in args.monitor_key else "max",
-            dir_path=dir_path,
+            dirpath=dirpath,
             filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
             save_last=True
         )]

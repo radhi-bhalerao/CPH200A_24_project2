@@ -1,3 +1,4 @@
+import os
 import argparse
 import json
 import random
@@ -5,12 +6,13 @@ import torch.multiprocessing as mp
 from itertools import product
 from main import main as train_model, parse_args as train_model_parse_args
 
+dirname = os.path.dirname(__file__)
 
 def add_main_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--config_path",
         type=str,
-        default="../grid_search.json",
+        default=os.path.join(dirname, "../grid_search.json"),
         help="Location of config file"
     )
 

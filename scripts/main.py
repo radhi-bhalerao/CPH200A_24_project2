@@ -1,7 +1,8 @@
 
 import argparse
 import sys
-from os.path import dirname, realpath
+import os
+from os.path import dirname, realpath, isdir
 
 sys.path.append(dirname(dirname(realpath(__file__))))
 from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel
@@ -41,7 +42,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
     parser.add_argument(
         "--project_name",
-        default="cornerstone",
+        default="cornerstone_project_2",
         help="Name of project for wandb"
     )
 
@@ -99,6 +100,13 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="Whether to use pretrained model weights (only used for resnet)"
     )
 
+    parser.add_argument(
+        "--wandb_entity",
+        default='CPH29-org',
+        type=str,
+        help="The wandb account to log metrics and models to"
+    )
+
     return parser
 
 def parse_args() -> argparse.Namespace:
@@ -132,16 +140,24 @@ def main(args: argparse.Namespace):
         model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
 
     print("Initializing trainer")
-    logger = pl.loggers.WandbLogger(project=args.project_name)
+    logger = pl.loggers.WandbLogger(project=args.project_name,
+                                    entity=args.wandb_entity,
+                                    group=args.model_name)
 
     args.trainer.accelerator = 'auto'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
 
+    dir_path = os.path.join('models', args.model_name)
+    if not isdir(dir_path):
+        os.makedirs(dir_path)
+
     args.trainer.callbacks = [
         pl.callbacks.ModelCheckpoint(
             monitor=args.monitor_key,
             mode='min' if "loss" in args.monitor_key else "max",
+            dir_path=dir_path,
+            filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
             save_last=True
         )]
 

@@ -10,6 +10,7 @@ from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
 from torch.cuda import device_count
+import wandb
 
 NAME_TO_MODEL_CLASS = {
     "mlp": MLP,
@@ -199,6 +200,9 @@ def main(args: argparse.Namespace):
 
     print("Evaluating model on test set")
     trainer.test(model, datamodule)
+
+    logger.finalize()
+    wandb.finish()
 
     print("Done")
 

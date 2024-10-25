@@ -110,6 +110,13 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="The wandb account to log metrics and models to"
     )
 
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=1,
+        help="Number of processes to running in parallel"
+    )
+
     return parser
 
 def parse_args() -> argparse.Namespace:
@@ -147,8 +154,7 @@ def main(args: argparse.Namespace):
         model implementations
     """
     # get workers for datamodule
-    num_workers = args.num_workers if 'num_workers' in vars(args) else None
-    datamodule_num_workers = get_datamodule_num_workers(num_workers)
+    datamodule_num_workers = get_datamodule_num_workers(args.num_workers)
     
     # get datamodule args
     datamodule_args = vars(args[args.dataset_name])

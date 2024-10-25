@@ -187,13 +187,19 @@ def main(args: argparse.Namespace):
             save_last=True
         )]
 
-    trainer = pl.Trainer(**vars(args.trainer))
+    # init trainer
+    trainer_args = vars(args.trainer)
+    trainer = pl.Trainer(**trainer_args)
 
     if args.train:
         print("Training model")
         trainer.fit(model, datamodule)
 
     print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
+
+    # re-init trainer for evaluation, per 
+    trainer_args.update({'devices': 1})
+    trainer = pl.Trainer(**trainer_args)
 
     print("Evaluating model on validation set")
     trainer.validate(model, datamodule)

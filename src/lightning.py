@@ -138,7 +138,7 @@ class MLP(Classifer):
 
         self.hidden_dim = hidden_dim
         self.use_bn = use_bn
-        self.bn = [nn.BatchNorm1D(hidden_dim)] if self.use_bn else []
+        self.bn = [nn.BatchNorm1d(hidden_dim)] if self.use_bn else []
         self.num_layers = num_layers
 
         self.first_layer = nn.Sequential(nn.Linear(input_dim, self.hidden_dim),
@@ -176,7 +176,7 @@ class LinearModel(Classifer):
 
         self.hidden_dim = hidden_dim
         self.use_bn = use_bn
-        self.bn = [nn.BatchNorm1D(self.hidden_dim)] if self.use_bn else []
+        self.bn = [nn.BatchNorm1d(self.hidden_dim)] if self.use_bn else []
         self.num_layers = num_layers
 
         self.first_layer = nn.Sequential(nn.Linear(input_dim, self.hidden_dim),
@@ -210,7 +210,7 @@ class CNN(Classifer):
 
         self.hidden_dim = hidden_dim
         self.use_bn = use_bn
-        self.bn_fc = [nn.BatchNorm1D(hidden_dim)] if self.use_bn else []
+        self.bn_fc = [nn.BatchNorm1d(hidden_dim)] if self.use_bn else []
         self.num_layers = num_layers
 
         # initialize convolutional layers 
@@ -224,7 +224,7 @@ class CNN(Classifer):
                                            nn.ReLU()
                                             )
             else: # subsequent conv layers
-                bn_conv = [nn.BatchNorm2D(out_channels)] if self.use_bn else []
+                bn_conv = [nn.BatchNorm2d(out_channels)] if self.use_bn else []
                 conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
                                            *bn_conv,
                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),

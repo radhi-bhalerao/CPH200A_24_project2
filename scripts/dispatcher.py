@@ -22,6 +22,13 @@ def add_main_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         default=1,
         help="Number of processes to run in parallel"
     )
+    
+    parser.add_argument(
+        "--train",
+        default=True,
+        action="store_false",
+        help="Whether to train the model."
+    )
 
     return parser
 

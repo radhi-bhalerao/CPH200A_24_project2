@@ -110,6 +110,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     return parser
 
 def parse_args() -> argparse.Namespace:
+    pl.utilities.seed.seed_everything(seed=1, workers=True) # set seed
     parser = LightningArgumentParser()
     parser.add_lightning_class_args(pl.Trainer, nested_key="trainer")
     for model_name, model_class in NAME_TO_MODEL_CLASS.items():

@@ -104,7 +104,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
     parser.add_argument(
         "--wandb_entity",
-        default='CPH29-org',
+        default='CPH29',
         type=str,
         help="The wandb account to log metrics and models to"
     )

@@ -26,7 +26,7 @@ def add_main_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--train",
         default=True,
-        action="store_false",
+        type=bool,
         help="Whether to train the model."
     )
 

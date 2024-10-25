@@ -64,7 +64,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--train",
         default=False,
-        action="store_true",
+        type=bool,
         help="Whether to train the model."
     )
 

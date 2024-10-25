@@ -1,4 +1,5 @@
-
+import inspect
+import math
 import argparse
 import sys
 import os
@@ -9,6 +10,7 @@ from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
+from torch.cuda import device_count
 
 NAME_TO_MODEL_CLASS = {
     "mlp": MLP,
@@ -121,6 +123,18 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
+def get_caller():
+    caller = os.path.split(inspect.getsourcefile(sys._getframe(1)))[-1]
+    return caller
+
+def get_datamodule_num_workers(num_process_workers=None):
+    # set per https://discuss.pytorch.org/t/guidelines-for-assigning-num-workers-to-dataloader/813/5
+    num_process_workers = num_process_workers if num_process_workers else 1
+    datamodule_num_workers = device_count() * 4
+    n_cpus = os.cpu_count()
+    if datamodule_num_workers * num_process_workers >= n_cpus:
+        datamodule_num_workers = math.floor(n_cpus/num_process_workers * .9) 
+    return datamodule_num_workers
 
 def main(args: argparse.Namespace):
     print(args)
@@ -132,7 +146,16 @@ def main(args: argparse.Namespace):
         However, you may want to alter this code for special localization logic or to suit your risk
         model implementations
     """
-    datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**vars(args[args.dataset_name]))
+    # get workers for datamodule
+    num_workers = args.num_workers if 'num_workers' in vars(args) else None
+    datamodule_num_workers = get_datamodule_num_workers(num_workers)
+    
+    # get datamodule args
+    datamodule_args = vars(args[args.dataset_name])
+    datamodule_args.update({'num_workers': datamodule_num_workers})
+
+    # init data module
+    datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**datamodule_args)
 
     print("Initializing model")
     if args.checkpoint_path is None:
@@ -146,6 +169,7 @@ def main(args: argparse.Namespace):
                                     group=args.model_name)
 
     args.trainer.accelerator = 'auto'
+    args.trainer.strategy = 'ddp'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
 

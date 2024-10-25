@@ -1,7 +1,7 @@
 import argparse
 import json
 import random
-import multiprocessing
+import torch.multiprocessing as mp
 from itertools import product
 from main import main as train_model, parse_args as train_model_parse_args
 
@@ -45,7 +45,7 @@ def get_experiment_list(config: dict) -> (list[dict]):
 
     return jobs
 
-def worker(args: argparse.Namespace, job_queue: multiprocessing.Queue, done_queue: multiprocessing.Queue):
+def worker(args: argparse.Namespace, job_queue: mp.SimpleQueue, done_queue: mp.SimpleQueue):
     '''
     Worker thread for each worker. Consumes all jobs and pushes results to done_queue.
     :args - command line args
@@ -93,8 +93,8 @@ def main(args: argparse.Namespace) -> dict:
     experiments = get_experiment_list(config)
     random.shuffle(experiments)
 
-    job_queue = multiprocessing.Queue()
-    done_queue = multiprocessing.Queue()
+    job_queue = mp.SimpleQueue()
+    done_queue = mp.SimpleQueue()
 
     for exper in experiments:
         job_queue.put(exper)
@@ -102,9 +102,16 @@ def main(args: argparse.Namespace) -> dict:
     print("Launching dispatcher with {} experiments and {} workers".format(len(experiments), args.num_workers))
 
     # Define worker fn to launch an experiment as a separate process.
-    # (seems unnecessary to change anything, per: https://stackoverflow.com/questions/13606867/)
+    # Note: all tensors sent through a multiprocessing.Queue, will have their data moved into shared memory 
+    # and will only send a handle to another process
+    processes = []
     for _ in range(args.num_workers):
-        multiprocessing.Process(target=worker, args=(args, job_queue, done_queue)).start()
+        p = mp.Process(target=worker, args=(args, job_queue, done_queue))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
 
     print("Done")
 

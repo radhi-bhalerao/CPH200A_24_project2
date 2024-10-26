@@ -75,13 +75,15 @@ def launch_experiment(args: argparse.Namespace, experiment_config: dict) ->  dic
     scripts/main.py
 
     '''
-    main_args = []
-    for k, v in {**experiment_config, **vars(args)}.items():
-        if k in vars(train_model_parse_args()):
-            main_args.extend([f'--{k}', f'{v}'])
+    train_model_args = train_model_parse_args()
+    train_model_vars = vars(train_model_args)
+    update_vars = {k: v for k, v in {**experiment_config, **vars(args)}.items() if k in train_model_vars}
+    train_model_vars.update(update_vars)
 
     # run experiment
-    train_model(main_args)
+    train_model(train_model_args)
+
+    return {}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()

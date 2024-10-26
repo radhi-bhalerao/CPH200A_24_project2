@@ -144,7 +144,6 @@ def get_datamodule_num_workers(num_process_workers=None):
     return datamodule_num_workers
 
 def main(args: argparse.Namespace):
-    print(args)
     print("Loading data ..")
 
     print("Preparing lighning data module (encapsulates dataset init and data loaders)")
@@ -163,16 +162,21 @@ def main(args: argparse.Namespace):
     # init data module
     datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**datamodule_args)
 
-    print("Initializing model")
+    print(f"Initializing {args.model_name} model")
     if args.checkpoint_path is None:
-        model = NAME_TO_MODEL_CLASS[args.model_name](**vars(args[args.model_name]))
+        model_vars = vars(args[args.model_name])
+        update_vars = {k:v for k,v in vars(args).items() if k in model_vars}
+        model_vars.update(update_vars)
+        print('with params ', model_vars)
+        model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
     else:
         model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
 
     print("Initializing trainer")
     logger = pl.loggers.WandbLogger(project=args.project_name,
                                     entity=args.wandb_entity,
-                                    group=args.model_name)
+                                    group=args.model_name,
+                                    dir=os.path.join(dirname, '..'))
 
     args.trainer.accelerator = 'auto'
     args.trainer.strategy = 'ddp'
@@ -208,10 +212,6 @@ def main(args: argparse.Namespace):
         trainer.fit(model, datamodule)
 
     print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
-
-    # re-init trainer for evaluation, per lightning recommendation
-    trainer_args.update({'devices': 1})
-    trainer = pl.Trainer(**trainer_args)
 
     print("Evaluating model on validation set")
     trainer.validate(model, datamodule)

@@ -75,20 +75,13 @@ def launch_experiment(args: argparse.Namespace, experiment_config: dict) ->  dic
     scripts/main.py
 
     '''
+    main_args = []
+    for k, v in {**experiment_config, **vars(args)}.items():
+        if k in vars(train_model_parse_args()):
+            main_args.extend([f'--{k}', f'{v}'])
 
-    # get default model training args
-    train_model_args = train_model_parse_args()
-    d = vars(train_model_args)
-
-    # update train_model_args with items shared by args
-    d.update({k: v for k, v in vars(args).items() if k in d})
-    
-    # update model namespace args
-    model_d = vars(d[experiment_config['model_name']])
-    model_d.update({k: v for k, v in experiment_config.items() if k in model_d})
-    
     # run experiment
-    train_model(train_model_args)
+    train_model(main_args)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -97,7 +90,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 def main(args: argparse.Namespace) -> dict:
-    print(args)
+    # print(args)
     config = json.load(open(args.config_path, "r"))
     print("Starting grid search with the following config:")
     print(config)

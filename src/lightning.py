@@ -220,13 +220,15 @@ class CNN(Classifer):
             if i == 0: # first conv layer
                 in_channels = input_dim[0]
                 out_channels = 20
-                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                k = 5 # Conv2d kernel size
+                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(k,k)),
                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
                                            nn.ReLU()
                                             )
             else: # subsequent conv layers
+                k = 3
                 bn_conv = [nn.BatchNorm2d(out_channels)] if self.use_bn else []
-                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(5, 5)),
+                conv_layer = nn.Sequential(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(k,k)),
                                            *bn_conv,
                                            nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2)),
                                            nn.ReLU()

@@ -15,7 +15,7 @@ from einops import rearrange
 seed_everything(2)
 
 class Classifer(pl.LightningModule):
-    def __init__(self, num_classes=9, init_lr=1e-4):
+    def __init__(self, num_classes=9, init_lr=3e-4):
         super().__init__()
         self.init_lr = init_lr
         self.num_classes = num_classes
@@ -278,19 +278,17 @@ class ResNet18(Classifer):
         self.save_hyperparameters()
 
         # Initialize a ResNet18 model
-        backbone = models.resnet18(weights='DEFAULT')
+        weights_kwargs = {'weights': 'IMAGENET1K_V1'} if pretraining else {} 
+        backbone = models.resnet18(**weights_kwargs)
         num_filters = backbone.fc.in_features
         layers = list(backbone.children())[:-1]
 
-        self.feature_extractor = nn.Sequential(*layers)
-
-        if not pretraining:
-            self.feature_extractor.apply(self.init_weights)
+        self.feature_extractor = nn.Sequential(*layer)
 
         self.classifier = nn.Sequential(nn.Linear(num_filters, num_classes),    
                                          nn.Softmax(dim=-1)
                                          )
-
+        self.classifier.apply(self.init_weights)
 
     def forward(self, x):
         batch_size, channels, width, height = x.size()

@@ -10,8 +10,9 @@ import joblib
 import json
 import tqdm
 import os
-from collections import Counter
+from collections import defaultdict, Counter
 import pickle
+from einops import reduce
 
 dirname = os.path.dirname(__file__)
 root_dir = os.path.join(dirname, '../data')
@@ -31,41 +32,70 @@ class PathMnist(pl.LightningDataModule):
         self.use_data_augmentation = use_data_augmentation
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.global_stats = defaultdict(list)
+        self.common_transforms = None
 
         self.prepare_data_transforms()
-
+    
     def prepare_data_transforms(self):
         '''
             Prepare data transforms for train and test data.
             Note, you may want to apply data augmentation (see torchvision) for the train data.
         '''
-        # TODO: should we add normalization to transforms (across train set, by pixel)?
-        self.test_transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor()
-        ])
-        if self.use_data_augmentation:
-            self.train_transform = torchvision.transforms.Compose([
-                v2.RandomHorizontalFlip(p=0.15),
-                v2.RandomVeritcalFlip(p=0.15),
-                v2.RandomAutocontrast(p=0.15),
-                v2.RandomRotation(p=0.15),
-                torchvision.transforms.ToTensor()
-            ])
-        else:
-            self.train_transform = torchvision.transforms.Compose([
-                torchvision.transforms.ToTensor()
-            ])
 
+        self.test_transform = []
+
+        if self.use_data_augmentation:
+            self.train_transform = [
+                v2.RandomHorizontalFlip(p=0.375),
+                v2.RandomVerticalFlip(p=0.375),
+            ]
+        else:
+            self.train_transform = []
+    
     def prepare_data(self):
-        medmnist.PathMNIST(root=root_dir, split='train', download=True, transform=self.train_transform)
-        medmnist.PathMNIST(root=root_dir, split='val', download=True, transform=self.test_transform)
-        medmnist.PathMNIST(root=root_dir, split='test', download=True, transform=self.test_transform)
+        train_data = medmnist.PathMNIST(root=root_dir, split='train', download=True)
+        medmnist.PathMNIST(root=root_dir, split='val', download=True)
+        medmnist.PathMNIST(root=root_dir, split='test', download=True)
+
+        statistics = {'mean': torch.mean, 'std': torch.std}
+        print(f'Calculating {list(statistics.keys())} fron train data')
+        for img, _ in train_data:
+            img = torchvision.transforms.ToTensor()(img)
+            for stat_name, stat_func in statistics.items():
+                self.global_stats[stat_name].append(torch.Tensor([*reduce(img, 'c w h -> c () ()', stat_func)]))
+
+        for stat_name, stat_func in statistics.items():
+            self.global_stats[stat_name] = torch.stack(self.global_stats[stat_name]).mean(dim=0).squeeze().tolist()
+
+        del train_data
+
+    def get_transform(self, split='train'):
+        if split not in ['train', 'test']:
+            raise NotImplementedError(f'{split} is not a valid split name')
+
+        if split == 'train':
+            split_transform = self.train_transform
+        elif split == 'test':
+            split_transform = self.test_transform
+        
+        print(f'Broadcasting global statistics of train dataset.')
+        self.global_stats = self.trainer.strategy.broadcast(self.global_stats, src=0)
+
+        self.common_transform = [
+            torchvision.transforms.ToTensor(),
+            v2.Normalize(mean=self.global_stats['mean'], std=self.global_stats['std'])
+            ]
+
+        return v2.Compose([*split_transform, *self.common_transform])  
 
     def setup(self, stage=None):
-        self.train = medmnist.PathMNIST(root=root_dir, split='train', download=True, transform=self.train_transform)
-        self.val = medmnist.PathMNIST(root=root_dir, split='val', download=True, transform=self.test_transform)
-        self.test = medmnist.PathMNIST(root=root_dir, split='test', download=True, transform=self.test_transform)
-
+        print('Transforming data')
+        self.train = medmnist.PathMNIST(root=root_dir, split='train', download=True, transform=self.get_transform('train'))
+        self.val = medmnist.PathMNIST(root=root_dir, split='val', download=True, transform=self.get_transform('test'))
+        self.test = medmnist.PathMNIST(root=root_dir, split='test', download=True, transform=self.get_transform('test'))
+        print('Data transformed.')
+     
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
 
@@ -73,7 +103,7 @@ class PathMnist(pl.LightningDataModule):
         return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)      
 
 VOXEL_SPACING = (0.703125, 0.703125, 2.5)
 CACHE_IMG_SIZE = [256, 256]

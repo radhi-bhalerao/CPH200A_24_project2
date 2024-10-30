@@ -278,7 +278,7 @@ class ResNet18(Classifer):
         self.save_hyperparameters()
 
         # Initialize a ResNet18 model
-        weights_kwargs = {'weights': 'IMAGENET1K_V1'} if pretraining else {} 
+        weights_kwargs = {'weights': models.ResNet18_Weights.DEFAULT} if pretraining else {} 
         backbone = models.resnet18(**weights_kwargs)
         num_filters = backbone.fc.in_features
         layers = list(backbone.children())[:-1]

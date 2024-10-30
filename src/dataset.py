@@ -32,8 +32,10 @@ class PathMnist(pl.LightningDataModule):
         self.use_data_augmentation = use_data_augmentation
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.statistics = {'mean': torch.mean, 'std': torch.std}
         self.global_stats = defaultdict(list)
         self.common_transforms = None
+        self.data_prepared = False
 
         self.prepare_data_transforms()
     
@@ -54,21 +56,22 @@ class PathMnist(pl.LightningDataModule):
             self.train_transform = []
     
     def prepare_data(self):
-        train_data = medmnist.PathMNIST(root=root_dir, split='train', download=True)
-        medmnist.PathMNIST(root=root_dir, split='val', download=True)
-        medmnist.PathMNIST(root=root_dir, split='test', download=True)
+        if not self.data_prepared:
+            train_data = medmnist.PathMNIST(root=root_dir, split='train', download=True)
+            medmnist.PathMNIST(root=root_dir, split='val', download=True)
+            medmnist.PathMNIST(root=root_dir, split='test', download=True)
 
-        statistics = {'mean': torch.mean, 'std': torch.std}
-        print(f'Calculating {list(statistics.keys())} fron train data')
-        for img, _ in train_data:
-            img = torchvision.transforms.ToTensor()(img)
-            for stat_name, stat_func in statistics.items():
-                self.global_stats[stat_name].append(torch.Tensor([*reduce(img, 'c w h -> c () ()', stat_func)]))
+            print(f'Calculating {list(self.statistics.keys())} from train data')
+            for img, _ in train_data:
+                img = torchvision.transforms.ToTensor()(img)
+                for stat_name, stat_func in self.statistics.items():
+                    self.global_stats[stat_name].append(torch.Tensor([*reduce(img, 'c w h -> c () ()', stat_func)]))
 
-        for stat_name, stat_func in statistics.items():
-            self.global_stats[stat_name] = torch.stack(self.global_stats[stat_name]).mean(dim=0).squeeze().tolist()
+            for stat_name, stat_func in self.statistics.items():
+                self.global_stats[stat_name] = torch.stack(self.global_stats[stat_name]).mean(dim=0).squeeze().tolist()
 
-        del train_data
+            del train_data
+            self.data_prepared = True
 
     def get_transform(self, split='train'):
         if split not in ['train', 'test']:

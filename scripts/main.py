@@ -182,6 +182,7 @@ def main(args: argparse.Namespace):
     args.trainer.strategy = 'ddp'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
+    args.trainer.min_epochs = 80
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)

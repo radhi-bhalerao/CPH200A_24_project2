@@ -283,7 +283,7 @@ class ResNet18(Classifer):
         num_filters = backbone.fc.in_features
         layers = list(backbone.children())[:-1]
 
-        self.feature_extractor = nn.Sequential(*layer)
+        self.feature_extractor = nn.Sequential(*layers)
 
         self.classifier = nn.Sequential(nn.Linear(num_filters, num_classes),    
                                          nn.Softmax(dim=-1)

@@ -156,11 +156,13 @@ def main(args: argparse.Namespace):
     datamodule_num_workers = get_datamodule_num_workers(args.num_workers)
     
     # get datamodule args
-    datamodule_args = vars(args[args.dataset_name])
-    datamodule_args.update({'num_workers': datamodule_num_workers})
+    datamodule_vars = vars(args[args.dataset_name])
+    update_vars = {k:v for k,v in vars(args).items() if k in datamodule_vars}
+    datamodule_vars.update(update_vars)
+    datamodule_vars.update({'num_workers': datamodule_num_workers})
 
     # init data module
-    datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**datamodule_args)
+    datamodule = NAME_TO_DATASET_CLASS[args.dataset_name](**datamodule_vars)
 
     print(f"Initializing {args.model_name} model")
     if args.checkpoint_path is None:
@@ -182,7 +184,7 @@ def main(args: argparse.Namespace):
     args.trainer.strategy = 'ddp'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
-    args.trainer.min_epochs = 80
+    args.trainer.min_epochs = 200
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)
@@ -230,3 +232,4 @@ if __name__ == '__main__':
     __spec__ = None
     args = parse_args()
     main(args)
+

@@ -288,6 +288,8 @@ class ResNet18(Classifer):
         self.classifier = nn.Sequential(nn.Linear(num_filters, num_classes),    
                                          nn.Softmax(dim=-1)
                                          )
+        if not pretraining:
+            self.feature_extractor.apply(self.init_weights)
         self.classifier.apply(self.init_weights)
 
     def forward(self, x):

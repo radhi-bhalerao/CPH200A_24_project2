@@ -1,4 +1,5 @@
 import lightning.pytorch as pl
+import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import v2
 import medmnist
@@ -123,6 +124,7 @@ class NLST(pl.LightningDataModule):
 
     def __init__(
             self,
+            num_channels=3,
             use_data_augmentation=False,
             batch_size=1,
             num_workers=0,
@@ -137,6 +139,7 @@ class NLST(pl.LightningDataModule):
             **kwargs):
         super().__init__()
         self.save_hyperparameters()
+        self.num_channels = num_channels
 
         self.use_data_augmentation = use_data_augmentation
         self.batch_size = batch_size
@@ -231,9 +234,9 @@ class NLST(pl.LightningDataModule):
             # Introduce a method to deal with class imbalance (hint: think about your data loader)
             raise NotImplementedError("Not implemented yet")
 
-        self.train = NLST_Dataset(self.train, self.train_transform, self.normalize, self.img_size, self.num_images)
-        self.val = NLST_Dataset(self.val, self.test_transform, self.normalize, self.img_size, self.num_images)
-        self.test = NLST_Dataset(self.test, self.test_transform, self.normalize, self.img_size, self.num_images)
+        self.train = NLST_Dataset(self.train, self.train_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
+        self.val = NLST_Dataset(self.val, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
+        self.test = NLST_Dataset(self.test, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
 
     def get_label(self, pt_metadata, screen_timepoint):
         days_since_rand = pt_metadata["scr_days{}".format(screen_timepoint)][0]
@@ -275,36 +278,40 @@ class NLST_Dataset(torch.utils.data.Dataset):
         Pytorch Dataset for NLST dataset. Loads preprocesses data from disk and applies data augmentation. Generates masks from bounding boxes stored in metadata..
     """
 
-    def __init__(self, dataset, transforms, normalize, img_size=[128, 128], num_images=200):
+    def __init__(self, dataset, transforms, normalize, img_size=[128, 128], num_images=200, num_channels=1):
         self.dataset = dataset
         self.transform = transforms
         self.normalize = normalize
         self.img_size = img_size
         self.num_images = num_images
+        self.num_channels = num_channels
 
         print(self.get_summary_statement())
 
     def __len__(self):
         return len(self.dataset)
-    
+
     def __getitem__(self, idx):
         sample_path = self.dataset[idx]['path']
-        sample = joblib.load(sample_path+".z")
+        sample = joblib.load(sample_path + ".z")
         orig_pixel_spacing = torch.diag(torch.tensor(sample['pixel_spacing'] + [1]))
-        num_slices = sample['x'].size()[0]
+        num_slices = sample['x'].size(0)  # D
 
+        # Determine cancer laterality (keep for future localization)
         right_side_cancer = sample['cancer_laterality'][0] == 1 and sample['cancer_laterality'][1] == 0
         left_side_cancer = sample['cancer_laterality'][1] == 1 and sample['cancer_laterality'][0] == 0
 
         # TODO: You can modify the data loading of the bounding boxes to suit your localization method.
         # Hint: You may want to use the "cancer_laterality" field to localize the cancer coarsely.
 
+        # Handle bounding boxes and masks
         if not sample['has_localization']:
             sample['bounding_boxes'] = None
 
         mask = self.get_scaled_annotation_mask(sample['bounding_boxes'], CACHE_IMG_SIZE + [num_slices])
 
-        subject = tio.Subject( {
+        # Create TorchIO subject
+        subject = tio.Subject({
             'x': tio.ScalarImage(tensor=sample['x'].unsqueeze(0).to(torch.double), affine=orig_pixel_spacing),
             'mask': tio.LabelMap(tensor=mask.to(torch.double), affine=orig_pixel_spacing)
         })
@@ -317,14 +324,49 @@ class NLST_Dataset(torch.utils.data.Dataset):
         except:
             raise Exception("Error with subject {}".format(sample_path))
 
-        sample['x'], sample['mask'] = subject['x']['data'].to(torch.float), subject['mask']['data'].to(torch.float)
-        ## Normalize volume to have 0 pixel mean and unit variance
-        sample['x'] = self.normalize(sample['x'])
+        # Extract data      
+        x = subject['x']['data'].to(torch.float)  # Shape: [C, W, H, D]
+        mask = subject['mask']['data'].to(torch.float)
 
-        ## Remove potentially none items for batch collation
+        # Permute x and mask to [C, D, H, W]
+        x = x.permute(0, 3, 2, 1)  # From [C, W, H, D] to [C, D, H, W]
+        mask = mask.permute(0, 3, 2, 1)
+
+        # Normalize volume
+        x = self.normalize(x)  # Custom normalization (mean=0, std=1)
+        # print(f"Original sample['x'] shape: {x.shape}")
+        # Add batch dimension
+        x = x.unsqueeze(0)  # Shape: [1, C, D, H, W]
+        mask = mask.unsqueeze(0)
+        # print(f"Shape after adding batch dimension: {x.shape}")
+        # Resize x and mask to fixed size (e.g., D=32, H=224, W=224)
+        D_size, H_size, W_size = 32, 224, 224
+        x = F.interpolate(x, size=(D_size, H_size, W_size), mode='trilinear', align_corners=False)
+        mask = F.interpolate(mask, size=(D_size, H_size, W_size), mode='nearest')  # Use 'nearest' for masks
+
+        # print(f"Shape after interpolation: {x.shape}")
+        # Remove batch dimension
+        x = x.squeeze(0)  # Shape: [C, D_size, H_size, W_size]
+        mask = mask.squeeze(0)
+        # print(f"Shape after squeezing batch dimension: {x.shape}")
+        # Expand channels if needed
+        if self.num_channels == 3:
+            x = x.repeat(3, 1, 1, 1)  # From (1, D, H, W) to (3, D, H, W)
+            # print(f"Shape after channel repeat: {x.shape}")
+
+        # Prepare the sample
+        sample_dict = {
+            'x': x,  # Shape: (C, D, H, W)
+            'mask': mask,  # Shape: (1, D, H, W)
+            'y': torch.tensor(sample['y'], dtype=torch.long),
+            'y_seq': torch.tensor(self.dataset[idx]['y_seq'], dtype=torch.float),
+        }
+        print(f"y_seq shape: {sample_dict['y_seq'].shape}")
+
+        # Remove unnecessary items
         del sample['bounding_boxes']
 
-        return sample
+        return sample_dict
 
     def get_scaled_annotation_mask(self, bounding_boxes, img_size=[128,128, 200]):
         """

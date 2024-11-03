@@ -5,7 +5,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel
+from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel, ResNet3D, Swin3DModel
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
@@ -15,10 +15,14 @@ import wandb
 NAME_TO_MODEL_CLASS = {
     "mlp": MLP,
     "cnn": CNN,
+    # "cnn3d": CNN3D,
     "linear": LinearModel,
     "resnet": ResNet18,
+    "resnet3d": ResNet3D,
+    "swin3d": Swin3DModel,
     "risk_model": RiskModel
 }
+
 
 NAME_TO_DATASET_CLASS = {
     "pathmnist": PathMnist,
@@ -32,7 +36,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        choices=["mlp", "linear", "cnn", "resnet", "risk_model"],
+        choices=["mlp", "linear", "cnn", "resnet", "risk_model", "swin3d"],  
         help="Name of model to use",
     )
 
@@ -113,7 +117,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=1,
+        default=0,
         help="Number of processes to running in parallel"
     )
 
@@ -145,6 +149,11 @@ def get_datamodule_num_workers(num_process_workers=None):
 
 def main(args: argparse.Namespace):
     print("Loading data ..")
+    print(f"Training: {args.train}")
+    print(f"Model Name: {args.model_name}")
+    print(f"Dataset Name: {args.dataset_name}")
+    print(f"Pretraining: {args.pretraining}")
+    print(f"Num Workers: {args.num_workers}")
 
     print("Preparing lighning data module (encapsulates dataset init and data loaders)")
     """

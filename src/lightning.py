@@ -11,6 +11,11 @@ import torchvision
 import torchvision.models as models
 from src.cindex import concordance_index
 from einops import rearrange
+import timm
+from torchvision.models.video import r3d_18, R3D_18_Weights
+from torchvision.models.video import swin3d_b, Swin3D_B_Weights
+
+
 
 seed_everything(2)
 
@@ -297,6 +302,42 @@ class ResNet18(Classifer):
         x = rearrange(x, 'b c w h -> b c h w')
         x = self.feature_extractor(x).flatten(1)
         return self.classifier(x)
+
+
+class ResNet3D(Classifer):
+    def __init__(self, num_classes=2, init_lr=1e-3, pretraining=False, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+
+        if pretraining:
+            backbone = r3d_18(weights=R3D_18_Weights.DEFAULT)
+        else:
+            backbone = r3d_18(weights=None)
+        
+        # Modify the classifier
+        num_features = backbone.fc.in_features
+        backbone.fc = nn.Linear(num_features, num_classes)
+        self.model = backbone
+
+    def forward(self, x):
+        return self.model(x)
+
+class Swin3DModel(Classifer):
+    def __init__(self, num_classes=2, init_lr=1e-3, pretraining=True, num_channels=3, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+
+        if pretraining:
+            weights = Swin3D_B_Weights.DEFAULT
+            self.model = swin3d_b(weights=weights)
+        else:
+            self.model = swin3d_b(weights=None)
+
+        in_features = self.model.head.in_features
+        self.model.head = nn.Linear(in_features, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
 
 
 NLST_CENSORING_DIST = {

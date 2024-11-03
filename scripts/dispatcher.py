@@ -5,6 +5,7 @@ import random
 import torch.multiprocessing as mp
 from itertools import product
 from main import main as train_model, parse_args as train_model_parse_args
+import pdb
 
 dirname = os.path.dirname(__file__)
 
@@ -32,27 +33,31 @@ def add_main_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
     return parser
 
-def get_experiment_list(config: dict) -> (list[dict]):
+def get_experiment_list(config: dict) -> list:
     '''
-    Parses an experiment config, and creates jobs. For flags that are expected to be a single item, but the config contains a list, this will return one job for each item in the list.
-    :config - experiment_config
-
-    returns: jobs - a list of dicts, each of which encapsulates one job.
-        *Example: {learning_rate: 0.001 , batch_size: 16 ...}
+    Parses an experiment config and creates jobs.
     '''
     jobs = []
 
+    # Extract global arguments (keys not in 'args_by_model_name')
+    global_args = {k: v for k, v in config.items() if k != 'args_by_model_name'}
+
     # Go through the tree of possible jobs and enumerate into a list of jobs
     for model_name, valid_args in config['args_by_model_name'].items():
-
+        # Create all combinations of valid_args
         for elements in product(*[config[arg] for arg in valid_args]):
+            # For each combination of global arguments
+            for global_elements in product(*global_args.values()):
+                config_i = dict(zip(valid_args, elements))
+                config_i.update({'model_name': model_name})
 
-            config_i = dict(zip(valid_args, elements))
-            config_i.update({'model_name': model_name})
+                # Add global arguments
+                config_i.update(dict(zip(global_args.keys(), global_elements)))
 
-            jobs.append(config_i)
+                jobs.append(config_i)
 
     return jobs
+
 
 def worker(args: argparse.Namespace, job_queue: mp.SimpleQueue, done_queue: mp.SimpleQueue):
     '''
@@ -68,22 +73,22 @@ def worker(args: argparse.Namespace, job_queue: mp.SimpleQueue, done_queue: mp.S
         done_queue.put(
             launch_experiment(args, params))
 
-def launch_experiment(args: argparse.Namespace, experiment_config: dict) ->  dict:
-    '''
-    Launch an experiment and direct logs and results to a unique filepath.
-    :configs: flags to use for this model run. Will be fed into
-    scripts/main.py
-
-    '''
+def launch_experiment(args: argparse.Namespace, experiment_config: dict) -> dict:
     train_model_args = train_model_parse_args()
     train_model_vars = vars(train_model_args)
-    update_vars = {k: v for k, v in {**experiment_config, **vars(args)}.items() if k in train_model_vars}
+    update_vars = {k: v for k, v in {**experiment_config, **vars(args)}.items()}
     train_model_vars.update(update_vars)
+
+    # Update train_model_args with the updated variables
+    for key, value in train_model_vars.items():
+        if hasattr(train_model_args, key):
+            setattr(train_model_args, key, value)
 
     # run experiment
     train_model(train_model_args)
 
     return {}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()

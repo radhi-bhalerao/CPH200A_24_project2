@@ -152,8 +152,7 @@ def get_datamodule(args):
     datamodule_num_workers = get_datamodule_num_workers(args.num_workers)
     
     # get datamodule args
-    print(args)
-    datamodule_vars = vars(args[args.dataset_name])
+    datamodule_vars = vars(vars(args)[args.dataset_name])
     update_vars = {k:v for k,v in vars(args).items() if k in datamodule_vars}
     datamodule_vars.update(update_vars)
     datamodule_vars.update({'num_workers': datamodule_num_workers})
@@ -166,7 +165,7 @@ def get_datamodule(args):
 def get_model(args):
     print(f"Initializing {args.model_name} model")
     if args.checkpoint_path is None:
-        model_vars = vars(args[args.model_name])
+        model_vars = vars(vars(args)[args.model_name])
         update_vars = {k:v for k,v in vars(args).items() if k in model_vars}
         model_vars.update(update_vars)
         print('with params ', model_vars)

@@ -7,11 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LinearLR
 import torchmetrics
-import torchvision
 import torchvision.models as models
 from src.cindex import concordance_index
 from einops import rearrange
-import timm
 from torchvision.models.video import r3d_18, R3D_18_Weights
 from torchvision.models.video import swin3d_b, Swin3D_B_Weights
 
@@ -284,23 +282,14 @@ class ResNet18(Classifer):
 
         # Initialize a ResNet18 model
         weights_kwargs = {'weights': models.ResNet18_Weights.DEFAULT} if pretraining else {} 
-        backbone = models.resnet18(**weights_kwargs)
-        num_filters = backbone.fc.in_features
-        layers = list(backbone.children())[:-1]
+        self.classifier = models.resnet18(num_classes=num_classes, **weights_kwargs)
 
-        self.feature_extractor = nn.Sequential(*layers)
-
-        self.classifier = nn.Sequential(nn.Linear(num_filters, num_classes),    
-                                         nn.Softmax(dim=-1)
-                                         )
         if not pretraining:
-            self.feature_extractor.apply(self.init_weights)
-        self.classifier.apply(self.init_weights)
+            self.classifier.apply(self.init_weights)
 
     def forward(self, x):
         batch_size, channels, width, height = x.size()
         x = rearrange(x, 'b c w h -> b c h w')
-        x = self.feature_extractor(x).flatten(1)
         return self.classifier(x)
 
 

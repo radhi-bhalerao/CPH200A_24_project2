@@ -175,9 +175,9 @@ def get_model(args):
 
     return model
 
-def get_trainer(args, logger=None, callbacks=[]):
+def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
     args.trainer.accelerator = 'auto'
-    args.trainer.strategy = 'ddp'
+    args.trainer.strategy = strategy
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
     args.trainer.min_epochs = 100

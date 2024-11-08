@@ -3,52 +3,91 @@ import json
 import wandb
 from operator import mul
 from functools import reduce
+from itertools import product
+from copy import deepcopy
 from argparse import Namespace
-from main import get_model, get_callbacks, get_datamodule, get_trainer, parse_args as train_model_parse_args
+from main import get_model, get_callbacks, get_logger, get_datamodule, get_trainer, parse_args as train_model_parse_args, \
+                NAME_TO_DATASET_CLASS, NAME_TO_MODEL_CLASS, MODEL_TO_DATASET
 from scripts.dispatcher1 import parse_args as dispatcher_parse_args
 
 dirname = os.path.dirname(__file__)
 
 # get default args from dispatcher & main
-dispatcher_args = dispatcher_parse_args()
 train_model_args = train_model_parse_args()
+dispatcher_args = dispatcher_parse_args()
+param_config = json.load(open(dispatcher_args.config_path, "r"))
+    
+def get_train_model(model_name):
+    # get training args
+    train_model_vars = vars(deepcopy(train_model_args))
 
-def get_train_model(args):
+    # get dataset for model
+    dataset_name = MODEL_TO_DATASET[model_name]
+    
+    # update default args
+    train_model_vars['dataset_name'] = dataset_name
+    train_model_vars['model_name'] = model_name
+
+    # remove extra models from args
+    for model_i in NAME_TO_MODEL_CLASS.keys():
+        if model_i != model_name:
+            train_model_vars.pop(model_i, None)
+
+    # remove extra datasets from args
+    for dataset_i in NAME_TO_DATASET_CLASS.keys():
+        if dataset_i != dataset_name:
+            train_model_vars.pop(dataset_i, None)
 
     def train_model():
-        # init callbacks & trainer
-        callbacks = get_callbacks(args)
-        trainer = get_trainer(args, strategy='ddp_notebook', callbacks=callbacks)
-
         # init wandb
-        wandb.init(project=args.project_name,
-                    entity=args.wandb_entity,
-                    group=args.model_name,
+        wandb.init(project=train_model_vars['project_name'],
+                    entity=train_model_vars['wandb_entity'],
+                    group=model_name,
                     dir=os.path.join(dirname, '..'))
 
         # create config with required default args & wandb sweep params
-        config = {**vars(train_model_args), **vars(dispatcher_args), **wandb.config}
+        config = {**train_model_vars, **vars(dispatcher_args), **wandb.config}
+        update_model_args(config)
+        update_datamodule_args(config)
 
-        # init model & datamodule with sweep params
-        datamodule = get_datamodule(Namespace(**config))
-        model = get_model(Namespace(**config))
+        config = Namespace(**config)
 
-        # fit the model
-        trainer.fit(model, datamodule)    
+        # init training components
+        datamodule = get_datamodule(config)
+        model = get_model(config)
+        callbacks = get_callbacks(config)
+        logger = get_logger(config)
+        trainer = get_trainer(config, strategy='ddp_notebook', logger=logger, callbacks=callbacks)
+
+        # update wandb config
+        wandb.config.update(vars(config))
+
+        print("Training model")
+        trainer.fit(model, datamodule)
+
+        print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
 
     return train_model   
 
+def update_model_args(config):
+    model_params = param_config['args_by_model_name'][model_name]
+    model_vars = vars(config[model_name])
+    model_vars.update({k:v for k,v in config.items() if k in model_params})
+
+def update_datamodule_args(config):
+    dataset_name = config['dataset_name']
+    datamodule_vars = vars(config[dataset_name])
+    datamodule_vars.update({k:v for k,v in config.items() if k in datamodule_vars})
 
 if __name__ == '__main__':
-    for model_name in ['linear', 'mlp', 'cnn', 'resnet']:
+    for model_name in ['cnn']: #'mlp', 'linear', 'resnet'
         print(f'Running sweep for model "{model_name}"')
     
         # get search parameters
-        param_config = json.load(open(dispatcher_args.config_path, "r"))
         parameters = {k: {'values': v} for k,v in param_config.items() if k in param_config['args_by_model_name'][model_name]}
 
         # get sweep function
-        train_model = get_train_model(train_model_args)
+        train_model = get_train_model(model_name)
         count = reduce(mul, [len(v['values']) for v in parameters.values()], 1)
 
         # define sweep config

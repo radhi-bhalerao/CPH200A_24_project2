@@ -29,6 +29,17 @@ NAME_TO_DATASET_CLASS = {
     "nlst": NLST
 }
 
+MODEL_TO_DATASET = {
+    "mlp": "pathmnist",
+    "cnn": "pathmnist",
+    "cnn3d": "nlst",
+    "linear": "pathmnist",
+    "resnet": "pathmnist",
+    "resnet3d": "nlst",
+    "swin3d": "nlst",
+    "risk_model": "nlst"
+}
+
 dirname = os.path.dirname(__file__)
 
 def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:

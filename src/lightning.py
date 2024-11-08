@@ -277,12 +277,14 @@ class CNN(Classifer):
 
 class ResNet18(Classifer):
     def __init__(self, num_classes=9, init_lr=1e-3, pretraining=False, **kwargs):
+        print(num_classes)
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
         # Initialize a ResNet18 model
         weights_kwargs = {'weights': models.ResNet18_Weights.DEFAULT} if pretraining else {} 
-        self.classifier = models.resnet18(num_classes=num_classes, **weights_kwargs)
+        self.classifier = models.resnet18(**weights_kwargs)
+        self.classifier.fc = nn.Linear(2048, num_classes)
 
         if not pretraining:
             self.classifier.apply(self.init_weights)

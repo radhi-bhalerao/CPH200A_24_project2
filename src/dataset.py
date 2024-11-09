@@ -384,7 +384,7 @@ class NLST_Dataset(torch.utils.data.Dataset):
             'y': torch.tensor(sample['y'], dtype=torch.long),
             'y_seq': torch.tensor(self.dataset[idx]['y_seq'], dtype=torch.float),
         }
-        print(f"y_seq shape: {sample_dict['y_seq'].shape}")
+        # print(f"y_seq shape: {sample_dict['y_seq'].shape}")
 
         # Remove unnecessary items
         del sample['bounding_boxes']

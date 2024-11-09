@@ -14,6 +14,7 @@ import os
 from collections import defaultdict, Counter
 import pickle
 from einops import reduce
+from torch.utils.data import WeightedRandomSampler
 
 dirname = os.path.dirname(__file__)
 root_dir = os.path.join(dirname, '../data')
@@ -62,6 +63,7 @@ class PathMnist(pl.LightningDataModule):
             medmnist.PathMNIST(root=root_dir, split='val', download=True)
             medmnist.PathMNIST(root=root_dir, split='test', download=True)
 
+            # TODO: update to load statistics from file or save if it's not there
             print(f'Calculating {list(self.statistics.keys())} from train data')
             for img, _ in train_data:
                 img = torchvision.transforms.ToTensor()(img)
@@ -145,6 +147,10 @@ class NLST(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.max_followup = max_followup
+
+        self.train_sampler = None
+        self.val_sampler = None
+        self.test_sampler = None
 
         self.nlst_metadata_path = nlst_metadata_path
         self.nlst_dir = nlst_dir
@@ -230,9 +236,16 @@ class NLST(pl.LightningDataModule):
                     dataset.append(sample)
 
         if self.class_balance:
-            # This data is highly imbalanced!
-            # Introduce a method to deal with class imbalance (hint: think about your data loader)
-            raise NotImplementedError("Not implemented yet")
+            # calculate class sample count for each split
+            self.train_sampler = WeightedRandomSampler(self.get_samples_weight(self.train), num_samples=1)
+            self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=1)
+            self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=1)
+
+            # broadcast samplers to all nodes
+            self.train_sampler = self.trainer.strategy.broadcast(self.train_sampler, src=0)
+            self.val_sampler = self.trainer.strategy.broadcast(self.val_sampler, src=0)
+            self.test_sampler = self.trainer.strategy.broadcast(self.test_sampler, src=0)
+
 
         self.train = NLST_Dataset(self.train, self.train_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
         self.val = NLST_Dataset(self.val, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
@@ -264,14 +277,24 @@ class NLST(pl.LightningDataModule):
         return y, y_seq.astype("float64"), y_mask.astype("float64"), time_at_event
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, sampler=self.train_sampler)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False, sampler=self.val_sampler)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False, sampler=self.test_sampler)
 
+    def get_samples_weight(data):
+        target = np.array([sample['y'] for sample in data])
+        class_sample_count = np.array([len(np.where(target == t)[0]) for t in np.unique(target)])
+        weight = 1. / class_sample_count
+        samples_weight = np.array([weight[t] for t in target])
+
+        samples_weight = torch.from_numpy(samples_weight)
+        samples_weight = samples_weight.double()
+
+        return samples_weight
 
 class NLST_Dataset(torch.utils.data.Dataset):
     """

@@ -279,7 +279,6 @@ class CNN(Classifer):
 
 class ResNet18(Classifer):
     def __init__(self, num_classes=9, init_lr=1e-3, pretraining=False, **kwargs):
-        print(num_classes)
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 

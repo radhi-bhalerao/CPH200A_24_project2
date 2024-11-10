@@ -12,10 +12,12 @@ from src.cindex import concordance_index
 from einops import rearrange
 from torchvision.models.video import r3d_18, R3D_18_Weights
 from torchvision.models.video import swin3d_b, Swin3D_B_Weights
+import os
+import json
 
-
-
-seed_everything(2)
+dirname = os.path.dirname(__file__)
+global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
+seed_everything(global_seed)
 
 class Classifer(pl.LightningModule):
     def __init__(self, num_classes=9, init_lr=3e-4):

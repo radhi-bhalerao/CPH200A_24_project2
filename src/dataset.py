@@ -17,6 +17,7 @@ from einops import reduce
 from torch.utils.data import WeightedRandomSampler
 
 dirname = os.path.dirname(__file__)
+global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
 root_dir = os.path.join(dirname, '../data')
 if not os.path.isdir(root_dir):
     os.makedirs(root_dir)
@@ -35,9 +36,9 @@ class PathMnist(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.statistics = {'mean': torch.mean, 'std': torch.std}
-        self.global_stats = defaultdict(list)
+        self.global_stats_path = os.path.join(root_dir, f"pathmnist_stats_seed_{global_seed}.pt")
+        self.global_stats = torch.load(self.global_stats_path) if os.path.exists(self.global_stats_path) else defaultdict(list) 
         self.common_transforms = None
-        self.data_prepared = False
 
         self.prepare_data_transforms()
     
@@ -58,12 +59,11 @@ class PathMnist(pl.LightningDataModule):
             self.train_transform = []
     
     def prepare_data(self):
-        if not self.data_prepared:
-            train_data = medmnist.PathMNIST(root=root_dir, split='train', download=True)
-            medmnist.PathMNIST(root=root_dir, split='val', download=True)
-            medmnist.PathMNIST(root=root_dir, split='test', download=True)
+        train_data = medmnist.PathMNIST(root=root_dir, split='train', download=True)
+        medmnist.PathMNIST(root=root_dir, split='val', download=True)
+        medmnist.PathMNIST(root=root_dir, split='test', download=True)
 
-            # TODO: update to load statistics from file or save if it's not there
+        if not self.global_stats:
             print(f'Calculating {list(self.statistics.keys())} from train data')
             for img, _ in train_data:
                 img = torchvision.transforms.ToTensor()(img)
@@ -73,9 +73,11 @@ class PathMnist(pl.LightningDataModule):
             for stat_name, stat_func in self.statistics.items():
                 self.global_stats[stat_name] = torch.stack(self.global_stats[stat_name]).mean(dim=0).squeeze().tolist()
 
-            del train_data
-            self.data_prepared = True
+            print(f'Saving {list(self.statistics.keys())} from train data')
+            torch.save(self.global_stats, self.global_stats_path)
 
+            del train_data
+        
     def get_transform(self, split='train'):
         if split not in ['train', 'test']:
             raise NotImplementedError(f'{split} is not a valid split name')
@@ -85,8 +87,8 @@ class PathMnist(pl.LightningDataModule):
         elif split == 'test':
             split_transform = self.test_transform
         
-        print(f'Broadcasting global statistics of train dataset.')
-        self.global_stats = self.trainer.strategy.broadcast(self.global_stats, src=0)
+        if not self.global_stats:
+            self.global_stats = torch.load(self.global_stats_path, weights_only=True)
 
         self.common_transform = [
             torchvision.transforms.ToTensor(),

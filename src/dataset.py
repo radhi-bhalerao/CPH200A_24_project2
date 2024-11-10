@@ -15,6 +15,7 @@ from collections import defaultdict, Counter
 import pickle
 from einops import reduce
 from torch.utils.data import WeightedRandomSampler
+import warnings
 
 dirname = os.path.dirname(__file__)
 global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
@@ -37,7 +38,7 @@ class PathMnist(pl.LightningDataModule):
         self.num_workers = num_workers
         self.statistics = {'mean': torch.mean, 'std': torch.std}
         self.global_stats_path = os.path.join(root_dir, f"pathmnist_stats_seed_{global_seed}.pt")
-        self.global_stats = torch.load(self.global_stats_path) if os.path.exists(self.global_stats_path) else defaultdict(list) 
+        self.global_stats = torch.load(self.global_stats_path, weights_only=True) if os.path.exists(self.global_stats_path) else defaultdict(list) 
         self.common_transforms = None
 
         self.prepare_data_transforms()
@@ -115,6 +116,16 @@ class PathMnist(pl.LightningDataModule):
 
 VOXEL_SPACING = (0.703125, 0.703125, 2.5)
 CACHE_IMG_SIZE = [256, 256]
+torch_io_message = (
+                'Using TorchIO images without a torchio.SubjectsLoader in PyTorch >='
+                ' 2.3 might have unexpected consequences, e.g., the collated batches'
+                ' will be instances of torchio.Subject with 5D images. Replace'
+                ' your PyTorch DataLoader with a torchio.SubjectsLoader so that'
+                ' the collated batch becomes a dictionary, as expected. See'
+                ' https://github.com/fepegar/torchio/issues/1179 for more'
+                ' context about this issue.'
+            )
+warnings.filterwarnings("ignore", message=torch_io_message)
 
 class NLST(pl.LightningDataModule):
     """
@@ -194,7 +205,7 @@ class NLST(pl.LightningDataModule):
     def setup(self, stage=None):
         self.metadata = json.load(open(self.nlst_metadata_path, "r"))
         self.acc2lungrads = pickle.load(open(self.lungrads_path, "rb"))
-        self.valid_exams = set(torch.load(self.valid_exam_path))
+        self.valid_exams = set(torch.load(self.valid_exam_path, weights_only=True))
         self.train, self.val, self.test = [], [], []
 
         for mrn_row in tqdm.tqdm(self.metadata, position=0):
@@ -243,12 +254,6 @@ class NLST(pl.LightningDataModule):
             self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=1)
             self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=1)
 
-            # broadcast samplers to all nodes
-            self.train_sampler = self.trainer.strategy.broadcast(self.train_sampler, src=0)
-            self.val_sampler = self.trainer.strategy.broadcast(self.val_sampler, src=0)
-            self.test_sampler = self.trainer.strategy.broadcast(self.test_sampler, src=0)
-
-
         self.train = NLST_Dataset(self.train, self.train_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
         self.val = NLST_Dataset(self.val, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
         self.test = NLST_Dataset(self.test, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
@@ -279,16 +284,17 @@ class NLST(pl.LightningDataModule):
         return y, y_seq.astype("float64"), y_mask.astype("float64"), time_at_event
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, sampler=self.train_sampler)
+        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers, sampler=self.train_sampler)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False, sampler=self.val_sampler)
+        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers, sampler=self.val_sampler)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False, sampler=self.test_sampler)
+        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, num_workers=self.num_workers, sampler=self.test_sampler)
 
+    @staticmethod
     def get_samples_weight(data):
-        target = np.array([sample['y'] for sample in data])
+        target = np.array([int(sample['y']) for sample in data])
         class_sample_count = np.array([len(np.where(target == t)[0]) for t in np.unique(target)])
         weight = 1. / class_sample_count
         samples_weight = np.array([weight[t] for t in target])

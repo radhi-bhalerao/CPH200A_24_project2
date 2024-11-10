@@ -23,6 +23,7 @@ root_dir = os.path.join(dirname, '../data')
 if not os.path.isdir(root_dir):
     os.makedirs(root_dir)
 
+torch.serialization.add_safe_globals([defaultdict, list])
 
 class PathMnist(pl.LightningDataModule):
     """

@@ -132,6 +132,13 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="Number of processes to running in parallel"
     )
 
+    parser.add_argument(
+        "--class_balance",
+        default=False,
+        type=bool,
+        help="Whether to perform class-balanced sampling (only used for nlst dataset)"
+    )
+
     return parser
 
 def parse_args() -> argparse.Namespace:

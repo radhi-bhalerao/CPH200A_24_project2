@@ -285,7 +285,7 @@ class ResNet18(Classifer):
         # Initialize a ResNet18 model
         weights_kwargs = {'weights': models.ResNet18_Weights.DEFAULT} if pretraining else {} 
         self.classifier = models.resnet18(**weights_kwargs)
-        self.classifier.fc = nn.Linear(2048, num_classes)
+        self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
 
         if not pretraining:
             self.classifier.apply(self.init_weights)

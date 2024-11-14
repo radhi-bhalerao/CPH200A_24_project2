@@ -11,6 +11,14 @@ from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
 from torch.cuda import device_count
 import wandb
+from torch.backends import cudnn
+from lightning import seed_everything
+import json
+
+dirname = os.path.dirname(__file__)
+global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
+seed_everything(global_seed)
+cudnn.benchmark = False
 
 NAME_TO_MODEL_CLASS = {
     "mlp": MLP,
@@ -141,7 +149,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
     parser.add_argument(
         "--batch_size",
-        default=8,
+        default=4,
         type=int,
         help="Number of samples per batch"
     )
@@ -247,7 +255,8 @@ def get_callbacks(args):
             mode='min' if "loss" in args.monitor_key else "max",
             dirpath=dirpath,
             filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
-            save_last=True
+            save_last=True,
+            every_n_epochs=1
         ),
         pl.callbacks.EarlyStopping(
             monitor=args.monitor_key,

@@ -1,6 +1,5 @@
 import functools
 import operator
-from lightning import seed_everything
 import lightning.pytorch as pl
 import torch
 import torch.nn as nn
@@ -13,11 +12,16 @@ from einops import rearrange
 from torchvision.models.video import r3d_18, R3D_18_Weights
 from torchvision.models.video import swin3d_b, Swin3D_B_Weights
 import os
-import json
+from math import ceil
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import RocCurveDisplay, roc_curve
+from NLST_data_dict import subgroup_dict
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
 
 dirname = os.path.dirname(__file__)
-global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
-seed_everything(global_seed)
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 class Classifer(pl.LightningModule):
     def __init__(self, num_classes=9, init_lr=3e-4):
@@ -75,6 +79,12 @@ class Classifer(pl.LightningModule):
             "y_hat": y_hat,
             "y": y
         })
+
+        if self.trainer.datamodule.name == 'NLST':
+            self.validation_outputs[-1].update({
+                            "criteria": batch[self.trainer.datamodule.criteria],
+                            **{k:batch[k] for k in self.trainer.datamodule.group_keys},
+            })
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -91,6 +101,12 @@ class Classifer(pl.LightningModule):
             "y_hat": y_hat,
             "y": y
         })
+
+        if self.trainer.datamodule.name == 'NLST':
+            self.validation_outputs[-1].update({
+                            "criteria": batch[self.trainer.datamodule.criteria],
+                            **{k:batch[k] for k in self.trainer.datamodule.group_keys},
+            })
         return loss
     
     def on_train_epoch_end(self):
@@ -111,6 +127,8 @@ class Classifer(pl.LightningModule):
         else:
             probs = F.softmax(y_hat, dim=-1)
         self.log("val_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+
+    def on_validation_start(self):
         self.validation_outputs = []
 
     def on_test_epoch_end(self):
@@ -125,6 +143,10 @@ class Classifer(pl.LightningModule):
         self.log("test_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
         self.test_outputs = []
 
+    def on_save_checkpoint(self, checkpoint):
+        self.roc_analysis_across_nodes(self.validation_outputs)        
+        return super().on_save_checkpoint(checkpoint)
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.init_lr)
         scheduler = LinearLR(optimizer)
@@ -135,7 +157,148 @@ class Classifer(pl.LightningModule):
             nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
         elif isinstance(m, nn.Linear):
             nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
+
+    def roc_analysis_across_nodes(self, split_outputs):
+        if self.trainer.datamodule.name == 'NLST':
+            # collect outputs across samples into a single tensor
+            output_across_samples = {}
+            for k in ['y', 'y_hat', 'criteria', *self.trainer.datamodule.group_keys]:
+                output = torch.cat([o[k] for o in split_outputs])
+                if k == 'y_hat':
+                    if self.num_classes == 2:
+                        output = F.softmax(output, dim=-1)[:,-1]
+                    else:
+                        output = F.softmax(output, dim=-1)
+                output = output.view(-1)
+                output_across_samples.update({k: output})
+            
+            # init empty tensors to gather tensors across notes
+            output_across_nodes = {}
+            for k,v in output_across_samples.items():
+                output_across_nodes[k] = torch.zeros((int(self.trainer.world_size * len(v)))).type(v.type()).to(self.device).contiguous()
+
+            # wait for all nodes to catch up
+            torch.distributed.barrier()
+
+            # gather each tensor necessary for ROC plotting
+            for name, tensor in output_across_samples.items():
+                torch.distributed.all_gather_into_tensor(output_across_nodes[name], tensor.contiguous(), async_op=False)
+
+            if self.global_rank == 0: # on node 0
+                # send to numpy
+                output_across_nodes = {k:self.safely_to_numpy(v) for k,v in output_across_nodes.items()}
+
+                # transform arrays as needed
+                for k in self.trainer.datamodule.group_keys:
+                    if k in self.trainer.datamodule.vectorizer.features_fit:
+                        output_across_nodes.update(self.trainer.datamodule.vectorizer.transform({k: output_across_nodes[k]}))
+                    
+                # print(probs, y.view(-1), group_data) # samples are 2x batch_size
+                self.roc_analysis(y=output_across_nodes['y'], 
+                                    y_hat=output_across_nodes['y_hat'],
+                                    criteria=output_across_nodes['criteria'],
+                                    group_data={k:v for k,v in output_across_nodes.items() if k in self.trainer.datamodule.group_keys},
+                                    plot_label='val set'
+                                    )
+
+    @ staticmethod
+    def safely_to_numpy(tensor):
+        return tensor.to(torch.float).cpu().numpy().squeeze()
+
+    @staticmethod
+    def plot_roc_operation_point(y, y_hat, ax, plot_label):
+        fpr, tpr, _ = roc_curve(y, y_hat)
+        ax.plot(fpr[1], tpr[1], 'go', label=f'{plot_label} operation point')
+    
+    def roc_analysis(self, y, y_hat, criteria, plot_label, group_data=None):
+        # generate plots
+        roc_plot = self.generate_roc(y, y_hat, criteria)
+        print('ROC curve generated.')
+        if group_data:
+            subgroup_roc_plot = self.generate_subgroup_roc(y, y_hat, criteria, group_data)
+            print('Subgroup ROC curve generated.')
         
+        # generate plot names
+        plot_name = f'ROC, {plot_label}, epoch {self.current_epoch}'
+        subgroup_plot_name = f'ROC by subgroups, {plot_label}, epoch {self.current_epoch}'
+        
+        # log plots
+        if self.logger.experiment:
+            wandb_logger = self.logger
+            wandb_logger.log_image(key=plot_name, images=[roc_plot])
+            if group_data:
+                wandb_logger.log_image(key=subgroup_plot_name, images=[subgroup_roc_plot])
+
+
+    def generate_roc(self, y, y_hat, criteria):
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 8))
+
+        RocCurveDisplay.from_predictions(y,
+                                        y_hat,
+                                        name=None,
+                                        plot_chance_level=True,
+                                        ax=ax)
+                    
+        self.plot_roc_operation_point(y,
+                                      criteria,
+                                      ax=ax,
+                                      plot_label=self.trainer.datamodule.criteria)
+
+        ax.legend(loc='lower right', prop={'size': 8})
+
+        return fig
+
+    def generate_subgroup_roc(self, y, y_hat, criteria, group_data):
+        # set up figure
+        ncols = 2
+        nrows = ceil(len(group_data)/ncols)
+        fig, axs = plt.subplots(nrows, ncols, figsize=(int(ncols*10), (int(nrows*8))))
+        axs = axs.ravel()
+        axs_count = 0
+
+        for group_key, group_i in group_data.items():
+            subgroups = np.unique(group_i)
+
+            for j, subgroup in enumerate(subgroups):
+                # get group indices
+                subgroup_idxs = np.argwhere(group_i == subgroup)
+
+                # get subgroup name
+                if group_key in self.trainer.datamodule.vectorizer.features_fit:
+                    subgroup_name = self.trainer.datamodule.vectorizer.feature_levels[group_key][j]
+                else:
+                    subgroup_name = subgroup_dict[group_key][subgroup]                    
+
+                # get roc curve kwargs
+                roc_kwargs = dict(name=subgroup_name, 
+                                  pos_label=1,
+                                  ax=axs[axs_count])
+                
+                if j == len(subgroups) - 1:
+                    roc_kwargs.update(dict(plot_chance_level=True))
+
+                # generate roc curve
+                RocCurveDisplay.from_predictions(y[subgroup_idxs],
+                                                 y_hat[subgroup_idxs], 
+                                                 **roc_kwargs)
+            
+            # Plot operation point for_criteria
+            self.plot_roc_operation_point(y[subgroup_idxs],
+                                          criteria[subgroup_idxs],
+                                          ax=axs[axs_count],
+                                          plot_label=self.trainer.datamodule.criteria)
+
+            axs[axs_count].grid()
+            axs[axs_count].legend(loc='lower right', prop={'size': 8})
+            axs_count += 1
+        
+        # remove unused subplots
+        for i in range(axs_count, int(nrows*ncols)):
+            fig.delaxes(axs[i])
+
+        plt.tight_layout()
+
+        return fig        
 
 class MLP(Classifer):
     def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr=1e-3, **kwargs):

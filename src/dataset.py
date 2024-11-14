@@ -16,6 +16,7 @@ import pickle
 from einops import reduce
 from torch.utils.data import WeightedRandomSampler
 import warnings
+from src.vectorizer import Vectorizer
 
 dirname = os.path.dirname(__file__)
 global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
@@ -127,7 +128,7 @@ torch_io_message = (
                 ' context about this issue.'
             )
 warnings.filterwarnings("ignore", message=torch_io_message)
-
+    
 class NLST(pl.LightningDataModule):
     """
         Pytorch Lightning DataModule for NLST dataset. This will load the dataset, as used in https://ascopubs.org/doi/full/10.1200/JCO.22.01345.
@@ -152,6 +153,8 @@ class NLST(pl.LightningDataModule):
             max_followup=6,
             img_size = [256, 256],
             class_balance=False,
+            group_keys=['race', 'educat', 'gender', 'age', 'ethnic'],
+            feature_config=sorted(json.load(open("feature_config.json", "r"))['features']),
             **kwargs):
         super().__init__()
         self.save_hyperparameters()
@@ -173,6 +176,10 @@ class NLST(pl.LightningDataModule):
         self.valid_exam_path = valid_exam_path
         self.class_balance = class_balance
         self.lungrads_path = lungrads_path
+        self.group_keys = group_keys
+        self.criteria = 'lung_rads'
+        self.vectorizer = Vectorizer(feature_config=feature_config, num_bins=5)
+        self.name = 'NLST'
 
         self.prepare_data_transforms()
 
@@ -233,6 +240,10 @@ class NLST(pl.LightningDataModule):
                     )
 
                     y, y_seq, y_mask, time_at_event = self.get_label(pt_metadata, exam_dict["screen_timepoint"])
+
+                    # add group info
+                    group_info = {group_key: pt_metadata[group_key][0] for group_key in self.group_keys} if self.group_keys else {}
+
                     sample = {
                         "pid": pid,
                         "exam_str": exam_str,
@@ -244,20 +255,29 @@ class NLST(pl.LightningDataModule):
                         "time_at_event": time_at_event,
                         # lung_rads 0 indicates LungRads 1 and 2 (negative), 1 indicates LungRads 3 and 4 (positive)
                         # Follows "Pinsky PF, Gierada DS, Black W, et al: Performance of lung-RADS in the National Lung Screening Trial: A retrospective assessment. Ann Intern Med 162: 485-491, 2015"
-                        "lung_rads": self.acc2lungrads[exam_int]
+                        "lung_rads": self.acc2lungrads[exam_int],
+                        **group_info
                     }
 
                     dataset.append(sample)
 
         if self.class_balance:
             # calculate class sample count for each split
-            self.train_sampler = WeightedRandomSampler(self.get_samples_weight(self.train), num_samples=1)
-            self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=1)
-            self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=1)
+            self.train_sampler = WeightedRandomSampler(self.get_samples_weight(self.train), num_samples=len(self.train), replacement=False)
+            self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=len(self.val), replacement=False)
+            self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=len(self.test), replacement=False)
 
-        self.train = NLST_Dataset(self.train, self.train_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
-        self.val = NLST_Dataset(self.val, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
-        self.test = NLST_Dataset(self.test, self.test_transform, self.normalize, self.img_size, self.num_images, num_channels=self.num_channels)
+        self.fit_vectorizer(self.train)
+
+        NLST_kwargs = dict(normalize=self.normalize, 
+                           img_size=self.img_size, 
+                           num_images=self.num_images, 
+                           num_channels=self.num_channels, 
+                           group_keys=self.group_keys)
+
+        self.train = NLST_Dataset(self.train, self.train_transform, **NLST_kwargs)
+        self.val = NLST_Dataset(self.val, self.test_transform, **NLST_kwargs)
+        self.test = NLST_Dataset(self.test, self.test_transform, **NLST_kwargs)
 
     def get_label(self, pt_metadata, screen_timepoint):
         days_since_rand = pt_metadata["scr_days{}".format(screen_timepoint)][0]
@@ -305,18 +325,22 @@ class NLST(pl.LightningDataModule):
 
         return samples_weight
 
+    def fit_vectorizer(self, data):
+        self.vectorizer.fit(data)
+
 class NLST_Dataset(torch.utils.data.Dataset):
     """
         Pytorch Dataset for NLST dataset. Loads preprocesses data from disk and applies data augmentation. Generates masks from bounding boxes stored in metadata..
     """
 
-    def __init__(self, dataset, transforms, normalize, img_size=[128, 128], num_images=200, num_channels=1):
+    def __init__(self, dataset, transforms, normalize, img_size=[128, 128], num_images=200, num_channels=1, group_keys=[]):
         self.dataset = dataset
         self.transform = transforms
         self.normalize = normalize
         self.img_size = img_size
         self.num_images = num_images
         self.num_channels = num_channels
+        self.group_keys = group_keys
 
         print(self.get_summary_statement())
 
@@ -386,12 +410,17 @@ class NLST_Dataset(torch.utils.data.Dataset):
             x = x.repeat(3, 1, 1, 1)  # From (1, D, H, W) to (3, D, H, W)
             # print(f"Shape after channel repeat: {x.shape}")
 
+        # get group info
+        group_info = {k: torch.tensor([v]) for k,v in self.dataset[idx].items() if k in self.group_keys} if self.group_keys else {}
+
         # Prepare the sample
         sample_dict = {
             'x': x,  # Shape: (C, D, H, W)
             'mask': mask,  # Shape: (1, D, H, W)
             'y': torch.tensor(sample['y'], dtype=torch.long),
             'y_seq': torch.tensor(self.dataset[idx]['y_seq'], dtype=torch.float),
+            'lung_rads': torch.tensor([self.dataset[idx]['lung_rads']], dtype=torch.int),
+            **group_info
         }
         # print(f"y_seq shape: {sample_dict['y_seq'].shape}")
 

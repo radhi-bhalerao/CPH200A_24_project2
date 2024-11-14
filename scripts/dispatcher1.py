@@ -30,6 +30,13 @@ def add_main_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help="Whether to train the model."
     )
 
+    parser.add_argument(
+        "--batch_size",
+        default=256,
+        type=int,
+        help="Number of samples per batch"
+    )
+
     return parser
 
 def get_experiment_list(config: dict) -> (list[dict]):

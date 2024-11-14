@@ -47,7 +47,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        choices=["mlp", "linear", "cnn", "resnet", "risk_model", "swin3d"],  
+        choices=["mlp", "linear", "cnn", "resnet", "risk_model", "swin3d", "resnet3d"],  
         help="Name of model to use",
     )
 
@@ -137,6 +137,20 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         default=False,
         type=bool,
         help="Whether to perform class-balanced sampling (only used for nlst dataset)"
+    )
+
+    parser.add_argument(
+        "--batch_size",
+        default=8,
+        type=int,
+        help="Number of samples per batch"
+    )
+
+    parser.add_argument(
+        "--group_keys",
+        default=['race', 'educat', 'gender', 'age', 'ethnic'],
+        nargs='*',
+        help="The groups to perform subgroup analysis on (only used for nlst dataset)"
     )
 
     return parser

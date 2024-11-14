@@ -5,7 +5,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel, ResNet3D, Swin3DModel, ResNet18_adapted
+from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel, ResNet3D, Swin3DModel
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
@@ -26,7 +26,6 @@ NAME_TO_MODEL_CLASS = {
     # "cnn3d": CNN3D,
     "linear": LinearModel,
     "resnet": ResNet18,
-    "resnet_adapt": ResNet18_adapted,
     "resnet3d": ResNet3D,
     "swin3d": Swin3DModel,
     "risk_model": RiskModel
@@ -44,7 +43,6 @@ MODEL_TO_DATASET = {
     "cnn3d": "nlst",
     "linear": "pathmnist",
     "resnet": "pathmnist",
-    "resnet_adapt": "nlst",
     "resnet3d": "nlst",
     "swin3d": "nlst",
     "risk_model": "nlst"
@@ -57,7 +55,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        choices=["mlp", "linear", "cnn", "resnet", "resnet_adapt", "risk_model", "swin3d", "resnet3d"],  
+        choices=["mlp", "linear", "cnn", "resnet", "risk_model", "swin3d", "resnet3d"],  
         help="Name of model to use",
     )
 
@@ -163,14 +161,6 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="The groups to perform subgroup analysis on (only used for nlst dataset)"
     )
 
-    parser.add_argument(
-    "--depth_handling",
-    default="max_pool",
-    choices=["max_pool", "avg_pool", "slice_attention", "3d_conv"],
-    help="Method to handle depth dimension in ResNet18_adapted"
-)
-
-
     return parser
 
 def parse_args() -> argparse.Namespace:
@@ -214,27 +204,16 @@ def get_datamodule(args):
 
 def get_model(args):
     print(f"Initializing {args.model_name} model")
-    
-    # Check if the model is `resnet_adapt` to handle the specific `depth_handling` parameter
-    if args.model_name == "resnet_adapt":
-        model_vars = vars(vars(args)[args.model_name])
-        update_vars = {k: v for k, v in vars(args).items() if k in model_vars or k == 'depth_handling'}
-        model_vars.update(update_vars)
-    else:
-        # General model initialization without `depth_handling`
-        model_vars = vars(vars(args)[args.model_name])
-        update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
-        model_vars.update(update_vars)
-    
-    # Initialize the model either from scratch or from a checkpoint
     if args.checkpoint_path is None:
+        model_vars = vars(vars(args)[args.model_name])
+        update_vars = {k:v for k,v in vars(args).items() if k in model_vars}
+        model_vars.update(update_vars)
         print('with params ', model_vars)
         model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
     else:
         model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
 
     return model
-
 
 def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
     args.trainer.accelerator = 'auto'

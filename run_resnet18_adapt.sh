@@ -1,0 +1,11 @@
+python /scratch/users/rbhalerao/CPH200A_project2/scripts/main.py \
+    --model_name resnet_adapt \
+    --dataset_name nlst \
+    --train True \
+    --pretraining True \
+    --use_data_augmentation False \
+    --batch_size 2 \
+    --num_workers 4 \
+    --project_name "cornerstone_project_2" \
+    --wandb_entity "cph29" \
+    --depth_handling "max_pool" 

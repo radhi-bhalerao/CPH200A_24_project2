@@ -1,0 +1,120 @@
+100%|███████████████████████████████████████████████████████████████████████| 15000/15000 [00:00<00:00, 36047.06it/s]
+NLST Dataset. 28161 exams (417.0 with cancer in one year, 1444 cancer ever) from 9646 patients
+NLST Dataset. 6839 exams (99.0 with cancer in one year, 337 cancer ever) from 2336 patients
+NLST Dataset. 6479 exams (86.0 with cancer in one year, 320 cancer ever) from 2204 patients
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1,2,3]
+
+  | Name       | Type               | Params | Mode
+----------------------------------------------------------
+0 | loss       | CrossEntropyLoss   | 0      | train
+1 | accuracy   | MulticlassAccuracy | 0      | train
+2 | auc        | MulticlassAUROC    | 0      | train
+3 | classifier | ResNet             | 11.2 M | train
+----------------------------------------------------------
+11.2 M    Trainable params
+0         Non-trainable params
+11.2 M    Total params
+44.725    Total estimated model params size (MB)
+71        Modules in train mode
+0         Modules in eval mode
+Sanity Checking DataLoader 0:   0%|                                                            | 0/2 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 314, in <module>
+    main(args)
+  File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 294, in main
+    trainer.fit(model, datamodule)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 538, in fit
+    call._call_and_handle_interrupt(
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 46, in _call_and_handle_interrupt
+    return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/launchers/subprocess_script.py", line 105, in launch
+    return function(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 574, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 981, in _run
+    results = self._run_stage()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1023, in _run_stage
+    self._run_sanity_check()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1052, in _run_sanity_check
+    val_loop.run()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/utilities.py", line 178, in _decorator
+    return loop_run(self, *args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 135, in run
+    self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 396, in _evaluation_step
+    output = call._call_strategy_hook(trainer, hook_name, *step_args)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 319, in _call_strategy_hook
+    output = fn(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 410, in validation_step
+    return self._forward_redirection(self.model, self.lightning_module, "validation_step", *args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 640, in __call__
+    wrapper_output = wrapper_module(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/parallel/distributed.py", line 1643, in forward
+    else self._run_ddp_forward(*inputs, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/parallel/distributed.py", line 1459, in _run_ddp_forward
+    return self.module(*inputs, **kwargs)  # type: ignore[index]
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 633, in wrapped_forward
+    out = method(*_args, **_kwargs)
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 71, in validation_step
+    y_hat = self.forward(x)
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 458, in forward
+    batch_size, channels, width, height = x.size()
+ValueError: too many values to unpack (expected 4)
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 314, in <module>
+[rank0]:     main(args)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 294, in main
+[rank0]:     trainer.fit(model, datamodule)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 538, in fit
+[rank0]:     call._call_and_handle_interrupt(
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 46, in _call_and_handle_interrupt
+[rank0]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank0]:     return function(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 574, in _fit_impl
+[rank0]:     self._run(model, ckpt_path=ckpt_path)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 981, in _run
+[rank0]:     results = self._run_stage()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1023, in _run_stage
+[rank0]:     self._run_sanity_check()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1052, in _run_sanity_check
+[rank0]:     val_loop.run()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/utilities.py", line 178, in _decorator
+[rank0]:     return loop_run(self, *args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 135, in run
+[rank0]:     self._evaluation_step(batch, batch_idx, dataloader_idx, dataloader_iter)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 396, in _evaluation_step
+[rank0]:     output = call._call_strategy_hook(trainer, hook_name, *step_args)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 319, in _call_strategy_hook
+[rank0]:     output = fn(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 410, in validation_step
+[rank0]:     return self._forward_redirection(self.model, self.lightning_module, "validation_step", *args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 640, in __call__
+[rank0]:     wrapper_output = wrapper_module(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/parallel/distributed.py", line 1643, in forward
+[rank0]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/parallel/distributed.py", line 1459, in _run_ddp_forward
+[rank0]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/strategy.py", line 633, in wrapped_forward
+[rank0]:     out = method(*_args, **_kwargs)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 71, in validation_step
+[rank0]:     y_hat = self.forward(x)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 458, in forward
+[rank0]:     batch_size, channels, width, height = x.size()
+[rank0]: ValueError: too many values to unpack (expected 4)

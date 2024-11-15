@@ -279,8 +279,8 @@ class Classifer(pl.LightningModule):
                                                  **roc_kwargs)
             
             # Plot operation point for_criteria
-            self.plot_roc_operation_point(y[subgroup_idxs],
-                                          criteria[subgroup_idxs],
+            self.plot_roc_operation_point(y,
+                                          criteria,
                                           ax=axs[axs_count],
                                           plot_label=self.trainer.datamodule.criteria)
 

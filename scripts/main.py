@@ -151,7 +151,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
     parser.add_argument(
         "--batch_size",
-        default=4,
+        default=6,
         type=int,
         help="Number of samples per batch"
     )
@@ -277,7 +277,6 @@ def get_callbacks(args):
             dirpath=dirpath,
             filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
             save_last=True,
-            every_n_epochs=1
         ),
         pl.callbacks.EarlyStopping(
             monitor=args.monitor_key,

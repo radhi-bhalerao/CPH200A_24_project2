@@ -261,11 +261,6 @@ class NLST(pl.LightningDataModule):
 
                     dataset.append(sample)
 
-        if self.class_balance:
-            # calculate class sample count for each split
-            self.train_sampler = WeightedRandomSampler(self.get_samples_weight(self.train), num_samples=len(self.train), replacement=False)
-            self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=len(self.val), replacement=False)
-            self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=len(self.test), replacement=False)
 
         self.fit_vectorizer(self.train)
 
@@ -274,10 +269,26 @@ class NLST(pl.LightningDataModule):
                            num_images=self.num_images, 
                            num_channels=self.num_channels, 
                            group_keys=self.group_keys)
+        
+        if self.class_balance:
+            # calculate class sample count for each split
+            if stage == 'fit':
+                self.train_sampler = WeightedRandomSampler(self.get_samples_weight(self.train), num_samples=len(self.train), replacement=True)
+                self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=len(self.val), replacement=True)
+            
+            if stage == 'validate':
+                self.val_sampler = WeightedRandomSampler(self.get_samples_weight(self.val), num_samples=len(self.val), replacement=False)
 
-        self.train = NLST_Dataset(self.train, self.train_transform, **NLST_kwargs)
-        self.val = NLST_Dataset(self.val, self.test_transform, **NLST_kwargs)
-        self.test = NLST_Dataset(self.test, self.test_transform, **NLST_kwargs)
+            if stage in ['test', 'predict']:
+                self.test_sampler = WeightedRandomSampler(self.get_samples_weight(self.test), num_samples=len(self.test), replacement=False)
+
+        if stage == 'fit':
+            self.train = NLST_Dataset(self.train, self.train_transform, **NLST_kwargs)
+            self.val = NLST_Dataset(self.val, self.test_transform, **NLST_kwargs)
+        if stage == 'validate':
+            self.val = NLST_Dataset(self.val, self.test_transform, **NLST_kwargs)
+        if stage in ['test', 'predict']:
+            self.test = NLST_Dataset(self.test, self.test_transform, **NLST_kwargs)
 
     def get_label(self, pt_metadata, screen_timepoint):
         days_since_rand = pt_metadata["scr_days{}".format(screen_timepoint)][0]

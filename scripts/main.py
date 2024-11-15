@@ -241,7 +241,7 @@ def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
     args.trainer.strategy = strategy
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
-    args.trainer.min_epochs = 100
+    args.trainer.min_epochs = 20
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)

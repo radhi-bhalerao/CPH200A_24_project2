@@ -127,8 +127,7 @@ class Classifer(pl.LightningModule):
         else:
             probs = F.softmax(y_hat, dim=-1)
         self.log("val_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
-
-    def on_validation_start(self):
+        self.roc_analysis_across_nodes(self.validation_outputs, plot_label='val set')
         self.validation_outputs = []
 
     def on_test_epoch_end(self):
@@ -141,11 +140,8 @@ class Classifer(pl.LightningModule):
             probs = F.softmax(y_hat, dim=-1)
 
         self.log("test_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+        self.roc_analysis_across_nodes(self.test_outputs, plot_label='test set')
         self.test_outputs = []
-
-    def on_save_checkpoint(self, checkpoint):
-        self.roc_analysis_across_nodes(self.validation_outputs)        
-        return super().on_save_checkpoint(checkpoint)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.init_lr)
@@ -158,7 +154,7 @@ class Classifer(pl.LightningModule):
         elif isinstance(m, nn.Linear):
             nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
 
-    def roc_analysis_across_nodes(self, split_outputs):
+    def roc_analysis_across_nodes(self, split_outputs, plot_label='val set'):
         if self.trainer.datamodule.name == 'NLST':
             # collect outputs across samples into a single tensor
             output_across_samples = {}
@@ -198,7 +194,7 @@ class Classifer(pl.LightningModule):
                                     y_hat=output_across_nodes['y_hat'],
                                     criteria=output_across_nodes['criteria'],
                                     group_data={k:v for k,v in output_across_nodes.items() if k in self.trainer.datamodule.group_keys},
-                                    plot_label='val set'
+                                    plot_label=plot_label
                                     )
 
     @ staticmethod

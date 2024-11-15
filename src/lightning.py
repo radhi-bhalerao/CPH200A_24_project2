@@ -333,6 +333,7 @@ class MLP(Classifer):
         self.model.apply(self.init_weights)
 
     def forward(self, x):
+        
         batch_size, channels, width, height = x.size()
         x = rearrange(x, 'b c w h -> b (w h c)')
         return self.model(x)
@@ -454,10 +455,105 @@ class ResNet18(Classifer):
             self.classifier.apply(self.init_weights)
 
     def forward(self, x):
+        print('Size: ', x.size())
         batch_size, channels, width, height = x.size()
         x = rearrange(x, 'b c w h -> b c h w')
         return self.classifier(x)
 
+class ResNet18_adapted(Classifer):
+    def __init__(self, num_classes=9, init_lr=1e-3, pretraining=False, depth_handling='max_pool', **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+        
+        # Initialize a ResNet18 model
+        weights_kwargs = {'weights': models.ResNet18_Weights.DEFAULT} if pretraining else {} 
+        self.classifier = models.resnet18(**weights_kwargs)
+        self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
+        
+        # Add handling for depth dimension
+        self.depth_handling = depth_handling
+        
+        if depth_handling == '3d_conv':
+            # Replace first conv layer with 3D conv
+            self.classifier.conv1 = nn.Conv3d(
+                in_channels=3,
+                out_channels=64,
+                kernel_size=(3, 7, 7),
+                stride=(1, 2, 2),
+                padding=(1, 3, 3),
+                bias=False
+            )
+            # Add a transition layer after first conv to go back to 2D
+            self.transition = nn.Sequential(
+                nn.BatchNorm3d(64),
+                nn.ReLU(inplace=True),
+                nn.MaxPool3d(kernel_size=(2, 1, 1), stride=(2, 1, 1))
+            )
+        
+        if not pretraining:
+            self.classifier.apply(self.init_weights)
+
+    def forward(self, x):
+        # x shape: [batch_size, channels, depth, height, width]
+        batch_size, channels, depth, height, width = x.size()
+        
+        if self.depth_handling == 'max_pool':
+            # Method 1: Max pool across depth dimension
+            x = x.max(dim=2)[0]  # Shape becomes [batch_size, channels, height, width]
+            return self.classifier(x)
+            
+        elif self.depth_handling == 'avg_pool':
+            # Method 2: Average pool across depth dimension
+            x = x.mean(dim=2)  # Shape becomes [batch_size, channels, height, width]
+            return self.classifier(x)
+            
+        elif self.depth_handling == 'slice_attention':
+            # Method 3: Learn attention weights for each slice
+            # First, reshape to treat depth as batch dimension
+            x = x.permute(0, 2, 1, 3, 4).contiguous()
+            x = x.view(-1, channels, height, width)
+            
+            # Get features for each slice
+            features = self.classifier.conv1(x)
+            features = self.classifier.bn1(features)
+            features = self.classifier.relu(features)
+            features = self.classifier.maxpool(features)
+            features = self.classifier.layer1(features)
+            
+            # Reshape back to include depth
+            features = features.view(batch_size, depth, -1)
+            
+            # Simple attention mechanism
+            attention_weights = F.softmax(self.classifier.avgpool(features), dim=1)
+            weighted_features = (features * attention_weights).sum(dim=1)
+            
+            # Continue through rest of network
+            x = self.classifier.layer2(weighted_features)
+            x = self.classifier.layer3(x)
+            x = self.classifier.layer4(x)
+            x = self.classifier.avgpool(x)
+            x = torch.flatten(x, 1)
+            return self.classifier.fc(x)
+            
+        elif self.depth_handling == '3d_conv':
+            # Method 4: Start with 3D convolutions
+            x = self.classifier.conv1(x)
+            x = self.transition(x)
+            
+            # Reshape to 2D after initial 3D conv
+            x = x.squeeze(2)  # Remove depth dimension
+            
+            # Continue through rest of the network
+            x = self.classifier.bn1(x)
+            x = self.classifier.relu(x)
+            x = self.classifier.maxpool(x)
+            x = self.classifier.layer1(x)
+            x = self.classifier.layer2(x)
+            x = self.classifier.layer3(x)
+            x = self.classifier.layer4(x)
+            x = self.classifier.avgpool(x)
+            x = torch.flatten(x, 1)
+            return self.classifier.fc(x)
 
 class ResNet3D(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, pretraining=False, **kwargs):

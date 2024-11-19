@@ -19,6 +19,7 @@ from sklearn.metrics import RocCurveDisplay, roc_curve
 from NLST_data_dict import subgroup_dict
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
+from einops.layers.torch import Reduce
 
 dirname = os.path.dirname(__file__)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
@@ -103,8 +104,8 @@ class Classifer(pl.LightningModule):
         })
 
         if self.trainer.datamodule.name == 'NLST':
-            self.validation_outputs[-1].update({
-                            "criteria": batch[self.trainer.datamodule.criteria],
+            self.test_outputs[-1].update({
+                             "criteria": batch[self.trainer.datamodule.criteria],
                             **{k:batch[k] for k in self.trainer.datamodule.group_keys},
             })
         return loss
@@ -556,18 +557,15 @@ class ResNet3D(Classifer):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
-        if pretraining:
-            backbone = r3d_18(weights=R3D_18_Weights.DEFAULT)
-        else:
-            backbone = r3d_18(weights=None)
-        
-        # Modify the classifier
-        num_features = backbone.fc.in_features
-        backbone.fc = nn.Linear(num_features, num_classes)
-        self.model = backbone
+        weights_kwargs = {'weights': R3D_18_Weights.DEFAULT} if pretraining else {} 
+        self.classifier = r3d_18(**weights_kwargs)
+
+        # modify architecture
+        self.classifier.avgpool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
+        self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
 
     def forward(self, x):
-        return self.model(x)
+        return self.classifier(x)
 
 class Swin3DModel(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, pretraining=True, num_channels=3, **kwargs):

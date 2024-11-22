@@ -169,7 +169,7 @@ class Classifer(pl.LightningModule):
                 output = output.view(-1)
                 output_across_samples.update({k: output})
             
-            # init empty tensors to gather tensors across notes
+            # init empty tensors to gather tensors across nodes
             output_across_nodes = {}
             for k,v in output_across_samples.items():
                 output_across_nodes[k] = torch.zeros((int(self.trainer.world_size * len(v)))).type(v.type()).to(self.device).contiguous()
@@ -191,6 +191,7 @@ class Classifer(pl.LightningModule):
                         output_across_nodes.update(self.trainer.datamodule.vectorizer.transform({k: output_across_nodes[k]}))
                     
                 # print(probs, y.view(-1), group_data) # samples are 2x batch_size
+                # TODO: update for multiple years in risk model
                 self.roc_analysis(y=output_across_nodes['y'], 
                                     y_hat=output_across_nodes['y_hat'],
                                     criteria=output_across_nodes['criteria'],
@@ -594,23 +595,47 @@ NLST_CENSORING_DIST = {
     "5": 0.9461840310101468,
 }
 
+class Cumulative_Probability_Layer(nn.Module):
+    # adapted from: https://github.com/yala/Mirai/blob/master/onconet/models/cumulative_probability_layer.py
+    def __init__(self, num_features, max_followup):
+        super(Cumulative_Probability_Layer, self).__init__()
+
+        # init model components
+        self.hazard_fc = nn.Linear(num_features, max_followup) # hazard risk
+        self.base_hazard_fc = nn.Linear(num_features, 1)  # baseline risk
+        self.relu = nn.ReLU(inplace=True)
+
+    def hazards(self, x):
+        raw_hazard = self.hazard_fc(x)
+        pos_hazard = self.relu(raw_hazard) # enforce positive hazard scores
+        return pos_hazard
+
+    def forward(self, x):
+        hazards = self.hazards(x)
+        cum_prob = torch.cumsum(hazards, dim=1) + self.base_hazard_fc(x)
+        return cum_prob # logits
+
 class RiskModel(Classifer):
-    def __init__(self, input_num_chan=1, num_classes=2, init_lr = 1e-3, max_followup=6, **kwargs):
+    def __init__(self, num_classes=2, init_lr = 1e-3, max_followup=6, base_model=None, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
-
-        self.hidden_dim = 512
 
         ## Maximum number of followups to predict (set to 6 for full risk prediction task)
         self.max_followup = max_followup
 
-        # TODO: Initalize components of your model here
-        raise NotImplementedError("Not implemented yet")
-
-
+        # Initalize components of your model here
+        try: # replace fc layer with cancer risk model
+            num_features = base_model.model.head.in_features
+            base_model.model.head = Cumulative_Probability_Layer(num_features=num_features,
+                                                                 max_followup=self.max_followup)
+        except AttributeError:
+            num_features = base_model.classifier.fc.in_features
+            base_model.classifier.fc = Cumulative_Probability_Layer(num_features=num_features,
+                                                                    max_followup=self.max_followup)
+        self.model = base_model
 
     def forward(self, x):
-        raise NotImplementedError("Not implemented yet")
+        return self.model(x)
 
     def get_xy(self, batch):
         """
@@ -628,28 +653,30 @@ class RiskModel(Classifer):
     def step(self, batch, batch_idx, stage, outputs):
         x, y_seq, y_mask, region_annotation_mask = self.get_xy(batch)
 
-        # TODO: Get risk scores from your model
-        y_hat = None ## (B, T) shape tensor of risk scores.
-        # TODO: Compute your loss (with or without localization)
-        loss = None
+        # Get risk scores from your model
+        y_hat = self.forward(x) ## (B, T) shape tensor of risk scores.
 
-        raise NotImplementedError("Not implemented yet")
+        # Compute your loss (with or without localization) TODO: add localization loss
+        mask = torch.logical_or(torch.cumsum(y_seq, dim=0) > 0, y_mask) # mask right-censored followup in patients without cancer
+        loss = F.binary_cross_entropy_with_logits(y_hat, y_seq, reduction='none') # without localization
+        loss = (loss * mask).sum() / mask.sum() # masked average; possibly try dividing by self.max_followup
         
-        # TODO: Log any metrics you want to wandb
-        metric_value = -1
-        metric_name = "dummy_metric"
-        self.log('{}_{}'.format(stage, metric_name), metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
+        # # Log any metrics you want to wandb
+        # metric_dict = {}  
+        # for metric_value, metric_name in metric_dict.items():
+        #     self.log('{}_{}'.format(stage, metric_name), metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
 
-        # TODO: Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation.
+        # Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation.
         outputs.append({
             "y_hat": y_hat, # Logits for all risk scores
             "y_mask": y_mask, # Tensor of when the patient was observed
-            "y_seq": y_seq, # Tensor of when the patient had cancer
-            "y": batch["y"], # If patient has cancer within 6 years
-            "time_at_event": batch["time_at_event"] # Censor time
+            "y_seq": y_seq, # Tensor of when the patient had cancer 
+            "y": batch["y"], # If patient has cancer within 6 years (bool)
+            "time_at_event": batch["time_at_event"] # Censor time (int)
         })
 
         return loss
+    
     def training_step(self, batch, batch_idx):
         return self.step(batch, batch_idx, "train", self.training_outputs)
 
@@ -659,10 +686,11 @@ class RiskModel(Classifer):
         return self.step(batch, batch_idx, "test", self.test_outputs)
 
     def on_epoch_end(self, stage, outputs):
-        y_hat = F.sigmoid(torch.cat([o["y_hat"] for o in outputs]))
+        y_hat = F.sigmoid(torch.cat([o["y_hat"] for o in outputs])) # get probabilities from logits
         y_seq = torch.cat([o["y_seq"] for o in outputs])
         y_mask = torch.cat([o["y_mask"] for o in outputs])
 
+        # calculate auc by year
         for i in range(self.max_followup):
             '''
                 Filter samples for either valid negative (observed followup) at time i
@@ -672,6 +700,7 @@ class RiskModel(Classifer):
             valid_labels = y_seq[:, i][(y_mask[:, i] == 1)| (y_seq[:,i] == 1)]
             self.log("{}_{}year_auc".format(stage, i+1), self.auc(valid_probs, valid_labels.view(-1)), sync_dist=True, prog_bar=True)
 
+        # calculate concordance index
         y = torch.cat([o["y"] for o in outputs])
         time_at_event = torch.cat([o["time_at_event"] for o in outputs])
 
@@ -687,8 +716,10 @@ class RiskModel(Classifer):
 
     def on_validation_epoch_end(self):
         self.on_epoch_end("val", self.validation_outputs)
+        self.roc_analysis_across_nodes(self.validation_outputs, 'val set')
         self.validation_outputs = []
 
     def on_test_epoch_end(self):
         self.on_epoch_end("test", self.test_outputs)
+        self.roc_analysis_across_nodes(self.test_outputs, 'test set')
         self.test_outputs = []

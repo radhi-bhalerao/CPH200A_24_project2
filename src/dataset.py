@@ -250,9 +250,9 @@ class NLST(pl.LightningDataModule):
                         "exam_int": exam_int,
                         "path": os.path.join(self.nlst_dir, exam_str + ".pt"),
                         "y": y,
-                        "y_seq": y_seq,
-                        "y_mask": y_mask,
-                        "time_at_event": time_at_event,
+                        "y_seq": y_seq, # size: (self.maxfollowup, )
+                        "y_mask": y_mask, # size: (self.maxfollowup, )
+                        "time_at_event": time_at_event, # int
                         # lung_rads 0 indicates LungRads 1 and 2 (negative), 1 indicates LungRads 3 and 4 (positive)
                         # Follows "Pinsky PF, Gierada DS, Black W, et al: Performance of lung-RADS in the National Lung Screening Trial: A retrospective assessment. Ann Intern Med 162: 485-491, 2015"
                         "lung_rads": self.acc2lungrads[exam_int],
@@ -430,7 +430,9 @@ class NLST_Dataset(torch.utils.data.Dataset):
             'mask': mask,  # Shape: (1, D, H, W)
             'y': torch.tensor(sample['y'], dtype=torch.long),
             'y_seq': torch.tensor(self.dataset[idx]['y_seq'], dtype=torch.float),
+            'y_mask': torch.tensor(self.dataset[idx]['y_mask'], dtype=torch.float),
             'lung_rads': torch.tensor([self.dataset[idx]['lung_rads']], dtype=torch.int),
+            'time_at_event': torch.tensor([self.dataset[idx]['time_at_event']], dtype=torch.int),
             **group_info
         }
         # print(f"y_seq shape: {sample_dict['y_seq'].shape}")

@@ -57,7 +57,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        choices=["mlp", "linear", "cnn", "resnet", "resnet_adapt", "risk_model", "swin3d", "resnet3d"],  
+        choices=["mlp", "linear", "cnn", "resnet", "resnet_adapt", "swin3d", "resnet3d"],  
         help="Name of model to use",
     )
 
@@ -164,12 +164,30 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     )
 
     parser.add_argument(
-    "--depth_handling",
-    default="max_pool",
-    choices=["max_pool", "avg_pool", "slice_attention", "3d_conv"],
-    help="Method to handle depth dimension in ResNet18_adapted"
-)
+        "--depth_handling",
+        default="max_pool",
+        choices=["max_pool", "avg_pool", "slice_attention", "3d_conv"],
+        help="Method to handle depth dimension in ResNet18_adapted"
+    )
 
+    parser.add_argument(
+        "--risk",
+        action='store_true',
+        help="Whether to use the risk model"
+    )
+
+    parser.add_argument(
+        "--risk_model_checkpoint_path",
+        default=None,
+        help="Path to checkpoint to load the risk model from. If None, init from scratch. Unused if risk_model == False"
+    )
+
+    parser.add_argument(
+        "--max_followup",
+        default=1,
+        type=int,
+        help="Maximum number of followups to predict"
+    )
 
     return parser
 
@@ -228,10 +246,30 @@ def get_model(args):
     
     # Initialize the model either from scratch or from a checkpoint
     if args.checkpoint_path is None:
-        print('with params ', model_vars)
+        print(f'Initializing {args.model_name} with params:', update_vars)
         model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
     else:
+        print(f'Loading saved {args.model_name} from checkpoint')
         model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
+
+    # Initialize the risk model either from scratch or from a checkpoint
+    if args.risk_model:
+         # freeze base model weights if from checkpoint
+        if args.checkpoint_path is not None:
+            for param in model.parameters():
+                param.requires_grad = False
+
+        if args.risk_model_checkpoint_path is None: 
+            model_vars = vars(vars(args)['risk_model'])
+            update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
+            model_vars['base_model'] = model # add base model
+            model_vars.update(update_vars)
+
+            print(f'Initializing risk model with base model {args.model_name} and params:', update_vars)
+            model = NAME_TO_MODEL_CLASS['risk_model'](**model_vars)
+        else:
+            print(f'Loading saved risk model from checkpoint')
+            model = NAME_TO_MODEL_CLASS['risk_model'].load_from_checkpoint(args.risk_model_checkpoint_path)
 
     return model
 

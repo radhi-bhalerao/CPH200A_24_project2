@@ -231,35 +231,40 @@ def get_datamodule(args):
     return datamodule
 
 def get_model(args):
-    print(f"Initializing {args.model_name} model")
+    # Initialize the risk model from a checkpoint
+    if args.risk and args.risk_model_checkpoint_path:
+        print(f'Loading saved risk model from checkpoint')
+        model = NAME_TO_MODEL_CLASS['risk_model'].load_from_checkpoint(args.risk_model_checkpoint_path)  
+        
+        # get base model string
+        base_model_str = list(NAME_TO_MODEL_CLASS.keys())[list(NAME_TO_MODEL_CLASS.values()).index(type(model.model))]
     
-    # Check if the model is `resnet_adapt` to handle the specific `depth_handling` parameter
-    if args.model_name == "resnet_adapt":
-        model_vars = vars(vars(args)[args.model_name])
-        update_vars = {k: v for k, v in vars(args).items() if k in model_vars or k == 'depth_handling'}
-        model_vars.update(update_vars)
+        # update model name
+        vars(args)['model_name'] = f'risk_model_{base_model_str}'  
+
     else:
-        # General model initialization without `depth_handling`
+        # update default model params from args
         model_vars = vars(vars(args)[args.model_name])
         update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
         model_vars.update(update_vars)
     
-    # Initialize the model either from scratch or from a checkpoint
-    if args.checkpoint_path is None:
-        print(f'Initializing {args.model_name} with params:', update_vars)
-        model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
-    else:
-        print(f'Loading saved {args.model_name} from checkpoint')
-        model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
+        # Initialize the model either from scratch or from a checkpoint
+        if args.checkpoint_path is None:
+            print(f'Initializing {args.model_name} with params:', model_vars)
+            model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
+        else:
+            print(f'Loading saved {args.model_name} from checkpoint')
+            model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
 
-    # Initialize the risk model either from scratch or from a checkpoint
-    if args.risk_model:
-         # freeze base model weights if from checkpoint
-        if args.checkpoint_path is not None:
-            for param in model.parameters():
-                param.requires_grad = False
+        # Initialize the risk model from scratch
+        if args.risk and args.risk_model_checkpoint_path is None: 
 
-        if args.risk_model_checkpoint_path is None: 
+            # freeze base model weights if from checkpoint
+            if args.checkpoint_path is not None:
+                for param in model.parameters():
+                    param.requires_grad = False
+            
+            # update default risk model params from args
             model_vars = vars(vars(args)['risk_model'])
             update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
             model_vars['base_model'] = model # add base model
@@ -267,9 +272,9 @@ def get_model(args):
 
             print(f'Initializing risk model with base model {args.model_name} and params:', update_vars)
             model = NAME_TO_MODEL_CLASS['risk_model'](**model_vars)
-        else:
-            print(f'Loading saved risk model from checkpoint')
-            model = NAME_TO_MODEL_CLASS['risk_model'].load_from_checkpoint(args.risk_model_checkpoint_path)
+
+            # update model name
+            vars(args)['model_name'] = f'risk_model_{args.model_name}'
 
     return model
 
@@ -351,7 +356,7 @@ def main(args: argparse.Namespace):
         print("Training model")
         trainer.fit(model, datamodule)
 
-    print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
+        print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
 
     print("Evaluating model on validation set")
     trainer.validate(model, datamodule)

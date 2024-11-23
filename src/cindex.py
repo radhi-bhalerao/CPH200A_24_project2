@@ -1,5 +1,7 @@
 import numpy as np
 from lifelines.utils.btree import _BTree
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
 
 def concordance_index(
         event_times, predicted_scores, event_observed=None, censoring_dist=None
@@ -74,7 +76,8 @@ def concordance_index(
 
 def _concordance_ratio(num_correct, num_tied, num_pairs):
     if num_pairs == 0:
-        raise ZeroDivisionError("No admissable pairs in the dataset.")
+        warnings.warn("No admissable pairs for concordance ratio in the dataset. Returning ratio as NaN.", UndefinedMetricWarning)
+        return float('nan')
     return (num_correct + num_tied / 2) / num_pairs
 
 

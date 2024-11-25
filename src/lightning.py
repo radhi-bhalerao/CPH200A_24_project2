@@ -568,33 +568,59 @@ class ResNet3D(Classifer):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
-        weights_kwargs = {'weights': R3D_18_Weights.DEFAULT} if pretraining else {} 
-        self.classifier = r3d_18(**weights_kwargs)
+        # Load the pretrained ResNet3D model
+        weights_kwargs = {'weights': R3D_18_Weights.DEFAULT} if pretraining else {}
+        self.backbone = r3d_18(**weights_kwargs)
 
-        # modify architecture
-        self.classifier.avgpool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
-        self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
+        # Modify the model to remove the original classification head
+        num_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Identity()  # Remove the fully connected layer
+
+        # Define a new classification head
+        self.classification_head = nn.Linear(num_features, num_classes)
 
     def forward(self, x):
-        return self.classifier(x)
+        # Pass input through the backbone
+        features = self.backbone.stem(x)
+        features = self.backbone.layer1(features)
+        features = self.backbone.layer2(features)
+        features = self.backbone.layer3(features)
+        features = self.backbone.layer4(features)  # Activation maps from the last conv layer
+
+        # Global average pooling
+        pooled_features = self.backbone.avgpool(features).flatten(1)
+        logits = self.classification_head(pooled_features)
+
+        return logits, features  # Return logits and activation maps
 
 class Swin3DModel(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, pretraining=True, num_channels=3, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
+        # Load the pretrained Swin3D model
         if pretraining:
             weights = Swin3D_B_Weights.DEFAULT
-            self.model = swin3d_b(weights=weights)
+            self.backbone = swin3d_b(weights=weights)
         else:
-            self.model = swin3d_b(weights=None)
+            self.backbone = swin3d_b(weights=None)
 
-        in_features = self.model.head.in_features
-        self.model.head = nn.Linear(in_features, num_classes)
+        in_features = self.backbone.head.in_features
+        self.backbone.head = nn.Identity()  # Remove the original head
+
+        # Define a new classification head
+        self.classification_head = nn.Linear(in_features, num_classes)
 
     def forward(self, x):
-        return self.model(x)
+        # Extract features using the backbone
+        features = self.backbone.features(x)  # Activation maps
 
+        # Global average pooling
+        pooled_features = self.backbone.avgpool(features).flatten(1)
+        logits = self.classification_head(pooled_features)
+
+        return logits, features  # Return logits and activation maps
+    
 
 NLST_CENSORING_DIST = {
     "0": 0.9851928130104401,
@@ -626,15 +652,22 @@ class Cumulative_Probability_Layer(nn.Module):
         return cum_prob # logits
 
 class RiskModel(Classifer):
-    def __init__(self, num_classes=2, init_lr = 1e-3, max_followup=6, base_model=None, **kwargs):
+    def __init__(self, num_classes=2, init_lr=1e-3, max_followup=6, backbone=None, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
-        self.save_hyperparameters(ignore=['base_model'])
-
-        ## Maximum number of followups to predict (set to 6 for full risk prediction task)
+        self.save_hyperparameters(ignore=['backbone'])
         self.max_followup = max_followup
 
-        # Initalize components of your model here
-        self.model = self.update_base_model_for_risk_prediction(base_model)
+        # Use the modified ResNet3D model directly
+        self.backbone = backbone  # Assume backbone is an instance of the modified ResNet3D
+
+        # Define loss functions
+        self.classification_loss_fn = nn.BCEWithLogitsLoss()
+        self.localization_loss_fn = nn.BCEWithLogitsLoss()
+
+        # Initialize metrics
+        self.auc = torchmetrics.AUROC(task="binary")
+        self.iou_metric = torchmetrics.JaccardIndex(task="binary")
+        self.dice_metric = torchmetrics.DiceCoefficient()
     
     def update_base_model_for_risk_prediction(self, base_model):
         try: # replace fc layer with cancer risk model
@@ -650,7 +683,11 @@ class RiskModel(Classifer):
         return base_model
 
     def forward(self, x):
-        return self.model(x)
+        # Get logits and activation maps from the backbone
+        logits, activation_map = self.backbone(x)
+        # Adjust logits to match the follow-up time points
+        risk_scores = self.classification_head(logits)
+        return risk_scores, activation_map
 
     def get_xy(self, batch):
         """
@@ -663,44 +700,95 @@ class RiskModel(Classifer):
                 Hint: You may want to change the mask definition to suit your localization method
 
         """
-        return batch['x'], batch['y_seq'][:, :self.max_followup], batch['y_mask'][:, :self.max_followup], batch['mask']
+        x = batch['x']
+        y_seq = batch['y_seq'][:, :self.max_followup]
+        y_mask = batch['y_mask'][:, :self.max_followup]
+
+        region_annotation_mask = batch['mask']
+        region_annotation_mask = (region_annotation_mask > 0).float()
+
+        # Debug statements
+        print(f"x shape: {x.shape}")  # Expected: (B, C, D, W, H)
+        print(f"y_seq shape: {y_seq.shape}")  # Expected: (B, T)
+        print(f"y_mask shape: {y_mask.shape}")  # Expected: (B, T)
+        print(f"region_annotation_mask shape: {region_annotation_mask.shape}")  # Expected: (B, D, W, H)")
+        print(f"region_annotation_mask unique values: {region_annotation_mask.unique()}")  # Should be [0, 1]
+        
+        return x, y_seq, y_mask, region_annotation_mask
+
 
     def step(self, batch, batch_idx, stage, outputs):
         x, y_seq, y_mask, region_annotation_mask = self.get_xy(batch)
-
-        # Get risk scores from your model
-        y_hat = self.forward(x) ## (B, T) shape tensor of risk scores.
-
-        # Compute your loss (with or without localization) TODO: add localization loss
-        mask = torch.logical_or(torch.cumsum(y_seq, dim=0) > 0, y_mask) # mask right-censored followup in patients without cancer
-        loss = F.binary_cross_entropy_with_logits(y_hat, y_seq, reduction='none') # without localization
-        loss = (loss * mask).sum() / mask.sum() # masked average; possibly try dividing by self.max_followup to norm loss
         
-        # Log any metrics you want to wandb
-        metric_dict = {'loss': loss}  
+        # Get risk scores and activation maps from your model
+        y_hat, activation_map = self.forward(x)  # y_hat: (B, T), activation_map: (B, C, D, H, W)
+        
+        # Compute classification loss (risk prediction loss)
+        # Mask for right-censored follow-up in patients without cancer
+        mask = torch.logical_or(torch.cumsum(y_seq, dim=1) > 0, y_mask)  # Corrected dim from 0 to 1
+        classification_loss = F.binary_cross_entropy_with_logits(y_hat, y_seq, reduction='none')
+        classification_loss = (classification_loss * mask).sum() / mask.sum()  # Masked average
+        
+        # Process activation map for localization loss
+        # Average over channel dimension to get attention map
+        attention_map = activation_map.mean(dim=1, keepdim=True)  # Shape: (B, 1, D, H, W)
+        
+        # Resize attention map to match ground truth mask
+        attention_map_resized = F.interpolate(
+            attention_map, size=region_annotation_mask.shape[1:], mode='trilinear', align_corners=False
+        )
+        
+        # Normalize attention map
+        attention_map_normalized = (attention_map_resized - attention_map_resized.min()) / (
+            attention_map_resized.max() - attention_map_resized.min() + 1e-8
+        )
+        
+        # Compute localization loss
+        localization_loss = self.localization_loss_fn(
+            attention_map_normalized, region_annotation_mask.float()
+        )
+        
+        # Total loss
+        lambda_loc = 0.5  # Adjust this weight as needed
+        loss = classification_loss + lambda_loc * localization_loss
+        
+        # Log metrics
+        metric_dict = {
+            'classification_loss': classification_loss,
+            'localization_loss': localization_loss,
+            'total_loss': loss
+        }
+        
+        # Compute accuracy for each year
         for year in range(self.max_followup):
-            if mask[:, year].sum() > 0: # if any valid samples in year
-                year_acc = self.accuracy(y_hat[:, year][mask[:, year]],
-                                         y_seq[:, year][mask[:, year]]) 
+            if mask[:, year].sum() > 0:  # If any valid samples in year
+                year_acc = self.accuracy(
+                    y_hat[:, year][mask[:, year]],
+                    y_seq[:, year][mask[:, year]]
+                )
             else:
                 year_acc = float('nan')
             metric_dict.update({f'{year+1}year_acc': year_acc})
         
+        # Log metrics to wandb
         for metric_name, metric_value in metric_dict.items():
-            self.log('{}_{}'.format(stage, metric_name), metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
-
-        # Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation.
+            self.log(f'{stage}_{metric_name}', metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
+        
+        # Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation
         outputs.append({
-            "y_hat": y_hat, # Logits for all risk scores
-            "y_mask": y_mask, # Tensor of when the patient was observed
-            "y_seq": y_seq, # Tensor of when the patient had cancer 
-            "y": batch["y"], # If patient has cancer within 6 years (bool)
-            "time_at_event": batch["time_at_event"], # Censor time (int)
+            "y_hat": y_hat.detach(),  # Logits for all risk scores
+            "y_mask": y_mask,  # Tensor of when the patient was observed
+            "y_seq": y_seq,  # Tensor of when the patient had cancer
+            "y": batch["y"],  # If patient has cancer within 6 years (bool)
+            "time_at_event": batch["time_at_event"],  # Censor time (int)
+            "attention_map": attention_map_normalized.detach(),
+            "true_masks": region_annotation_mask,
             "criteria": batch[self.trainer.datamodule.criteria],
             **{k: batch[k] for k in self.trainer.datamodule.group_keys}
         })
-
+        
         return loss
+    
     
     def training_step(self, batch, batch_idx):
         return self.step(batch, batch_idx, "train", self.training_outputs)
@@ -733,6 +821,18 @@ class RiskModel(Classifer):
         else:
             c_index = 0
         self.log("{}_c_index".format(stage), c_index, sync_dist=True, prog_bar=True)
+        # Compute localization metrics
+        attention_maps = torch.cat([o["attention_map"] for o in outputs])
+        true_masks = torch.cat([o["true_masks"] for o in outputs])
+
+        # Binarize attention maps with a threshold (e.g., 0.5)
+        attention_maps_bin = (attention_maps > 0.5).float()
+
+        iou_score = self.iou_metric(attention_maps_bin, true_masks)
+        dice_score = self.dice_metric(attention_maps_bin, true_masks)
+
+        self.log(f'{stage}_IoU', iou_score, prog_bar=True)
+        self.log(f'{stage}_Dice', dice_score, prog_bar=True)
 
     def on_train_epoch_end(self):
         self.on_epoch_end("train", self.training_outputs)

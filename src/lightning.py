@@ -576,22 +576,29 @@ class ResNet3D(Classifer):
         num_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()  # Remove the fully connected layer
 
+        # Define pooling operation
+        self.pool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
+
         # Define a new classification head
         self.classification_head = nn.Linear(num_features, num_classes)
 
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         # Pass input through the backbone
         features = self.backbone.stem(x)
         features = self.backbone.layer1(features)
         features = self.backbone.layer2(features)
         features = self.backbone.layer3(features)
-        features = self.backbone.layer4(features)  # Activation maps from the last conv layer
+        activation_map = self.backbone.layer4(features)  # Activation maps from the last conv layer
 
-        # Global average pooling
-        pooled_features = self.backbone.avgpool(features).flatten(1)
-        logits = self.classification_head(pooled_features)
+        # pooling
+        pooled_features = self.pool(activation_map).squeeze()
 
-        return logits, features  # Return logits and activation maps
+        if return_features:
+            return pooled_features, activation_map
+        else:
+            # class prediction
+            logits = self.classification_head(pooled_features)
+            return logits
 
 class Swin3DModel(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, pretraining=True, num_channels=3, **kwargs):
@@ -608,18 +615,29 @@ class Swin3DModel(Classifer):
         in_features = self.backbone.head.in_features
         self.backbone.head = nn.Identity()  # Remove the original head
 
+        # Define pooling operation
+        self.pool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
+
         # Define a new classification head
         self.classification_head = nn.Linear(in_features, num_classes)
 
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         # Extract features using the backbone
-        features = self.backbone.features(x)  # Activation maps
+        x = self.backbone.patch_embed(x)  # B _T _H _W C
+        x = self.backbone.pos_drop(x)
+        x = self.backbone.features(x)  # B _T _H _W C 
+        x = self.backbone.norm(x)
+        activation_map = x.permute(0, 4, 1, 2, 3)  # B, C, _T, _H, _W, Activation maps
 
-        # Global average pooling
-        pooled_features = self.backbone.avgpool(features).flatten(1)
-        logits = self.classification_head(pooled_features)
+        # pooling
+        pooled_features = self.pool(activation_map).squeeze()
 
-        return logits, features  # Return logits and activation maps
+        if return_features:
+            return pooled_features, activation_map
+        else:
+            # class prediction
+            logits = self.classification_head(pooled_features)
+            return logits
     
 
 NLST_CENSORING_DIST = {
@@ -654,11 +672,15 @@ class Cumulative_Probability_Layer(nn.Module):
 class RiskModel(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, max_followup=6, backbone=None, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
-        self.save_hyperparameters(ignore=['backbone'])
+        self.save_hyperparameters()
         self.max_followup = max_followup
 
         # Use the modified ResNet3D model directly
         self.backbone = backbone  # Assume backbone is an instance of the modified ResNet3D
+
+        # Define classification head
+        self.classification_head = Cumulative_Probability_Layer(num_features=backbone.classification_head.in_features,
+                                                                max_followup=self.max_followup)
 
         # Define loss functions
         self.classification_loss_fn = nn.BCEWithLogitsLoss()
@@ -667,27 +689,18 @@ class RiskModel(Classifer):
         # Initialize metrics
         self.auc = torchmetrics.AUROC(task="binary")
         self.iou_metric = torchmetrics.JaccardIndex(task="binary")
-        self.dice_metric = torchmetrics.DiceCoefficient()
-    
-    def update_base_model_for_risk_prediction(self, base_model):
-        try: # replace fc layer with cancer risk model
-            if not isinstance(base_model.model.head, Cumulative_Probability_Layer):
-                num_features = base_model.model.head.in_features
-                base_model.model.head = Cumulative_Probability_Layer(num_features=num_features,
-                                                                    max_followup=self.max_followup)
-        except AttributeError:
-            if not isinstance(base_model.classifier.fc, Cumulative_Probability_Layer):
-                num_features = base_model.classifier.fc.in_features
-                base_model.classifier.fc = Cumulative_Probability_Layer(num_features=num_features,
-                                                                        max_followup=self.max_followup)
-        return base_model
+        self.dice_metric = torchmetrics.Dice()
 
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         # Get logits and activation maps from the backbone
-        logits, activation_map = self.backbone(x)
-        # Adjust logits to match the follow-up time points
-        risk_scores = self.classification_head(logits)
-        return risk_scores, activation_map
+        pooled_features, activation_map = self.backbone(x, return_features=True)
+
+        logits = self.classification_head(pooled_features)
+
+        if return_features:
+            return logits, activation_map
+        else:
+            return logits
 
     def get_xy(self, batch):
         """
@@ -707,12 +720,12 @@ class RiskModel(Classifer):
         region_annotation_mask = batch['mask']
         region_annotation_mask = (region_annotation_mask > 0).float()
 
-        # Debug statements
-        print(f"x shape: {x.shape}")  # Expected: (B, C, D, W, H)
-        print(f"y_seq shape: {y_seq.shape}")  # Expected: (B, T)
-        print(f"y_mask shape: {y_mask.shape}")  # Expected: (B, T)
-        print(f"region_annotation_mask shape: {region_annotation_mask.shape}")  # Expected: (B, D, W, H)")
-        print(f"region_annotation_mask unique values: {region_annotation_mask.unique()}")  # Should be [0, 1]
+        # # Debug statements
+        # print(f"x shape: {x.shape}")  # Expected: (B, C, D, W, H)
+        # print(f"y_seq shape: {y_seq.shape}")  # Expected: (B, T)
+        # print(f"y_mask shape: {y_mask.shape}")  # Expected: (B, T)
+        # print(f"region_annotation_mask shape: {region_annotation_mask.shape}")  # Expected: (B, D, W, H)")
+        # print(f"region_annotation_mask unique values: {region_annotation_mask.unique()}")  # Should be [0, 1]
         
         return x, y_seq, y_mask, region_annotation_mask
 
@@ -721,7 +734,7 @@ class RiskModel(Classifer):
         x, y_seq, y_mask, region_annotation_mask = self.get_xy(batch)
         
         # Get risk scores and activation maps from your model
-        y_hat, activation_map = self.forward(x)  # y_hat: (B, T), activation_map: (B, C, D, H, W)
+        y_hat, activation_map = self.forward(x, return_features=True)  # y_hat: (B, T), activation_map: (B, C, D, H, W)
         
         # Compute classification loss (risk prediction loss)
         # Mask for right-censored follow-up in patients without cancer
@@ -735,7 +748,7 @@ class RiskModel(Classifer):
         
         # Resize attention map to match ground truth mask
         attention_map_resized = F.interpolate(
-            attention_map, size=region_annotation_mask.shape[1:], mode='trilinear', align_corners=False
+            attention_map, size=region_annotation_mask.shape[2:], mode='trilinear', align_corners=False
         )
         
         # Normalize attention map
@@ -756,7 +769,7 @@ class RiskModel(Classifer):
         metric_dict = {
             'classification_loss': classification_loss,
             'localization_loss': localization_loss,
-            'total_loss': loss
+            'loss': loss  # must reflect monitor_key in EarlyStopping callback
         }
         
         # Compute accuracy for each year
@@ -821,18 +834,16 @@ class RiskModel(Classifer):
         else:
             c_index = 0
         self.log("{}_c_index".format(stage), c_index, sync_dist=True, prog_bar=True)
+
         # Compute localization metrics
         attention_maps = torch.cat([o["attention_map"] for o in outputs])
         true_masks = torch.cat([o["true_masks"] for o in outputs])
 
-        # Binarize attention maps with a threshold (e.g., 0.5)
-        attention_maps_bin = (attention_maps > 0.5).float()
+        iou_score = self.iou_metric(attention_maps, true_masks.int())
+        dice_score = self.dice_metric(attention_maps, true_masks.int())
 
-        iou_score = self.iou_metric(attention_maps_bin, true_masks)
-        dice_score = self.dice_metric(attention_maps_bin, true_masks)
-
-        self.log(f'{stage}_IoU', iou_score, prog_bar=True)
-        self.log(f'{stage}_Dice', dice_score, prog_bar=True)
+        self.log(f'{stage}_IoU', iou_score, sync_dist=True, prog_bar=True)
+        self.log(f'{stage}_Dice', dice_score, sync_dist=True, prog_bar=True)
 
     def on_train_epoch_end(self):
         self.on_epoch_end("train", self.training_outputs)

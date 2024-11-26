@@ -236,11 +236,11 @@ def get_model(args):
         print(f'Loading saved risk model from checkpoint')
         model = NAME_TO_MODEL_CLASS['risk_model'].load_from_checkpoint(args.risk_model_checkpoint_path)  
         
-        # get base model string
-        base_model_str = list(NAME_TO_MODEL_CLASS.keys())[list(NAME_TO_MODEL_CLASS.values()).index(type(model.model))]
+        # get backbone string
+        backbone_str = list(NAME_TO_MODEL_CLASS.keys())[list(NAME_TO_MODEL_CLASS.values()).index(type(model.model))]
     
         # update model name
-        vars(args)['model_name'] = f'risk_model_{base_model_str}'  
+        vars(args)['model_name'] = f'risk_{backbone_str}'  
 
     else:
         # update default model params from args
@@ -259,7 +259,7 @@ def get_model(args):
         # Initialize the risk model from scratch
         if args.risk and args.risk_model_checkpoint_path is None: 
 
-            # freeze base model weights if from checkpoint
+            # freeze backbone weights if from checkpoint
             if args.checkpoint_path is not None:
                 for param in model.parameters():
                     param.requires_grad = False
@@ -267,14 +267,14 @@ def get_model(args):
             # update default risk model params from args
             model_vars = vars(vars(args)['risk_model'])
             update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
-            model_vars['base_model'] = model # add base model
+            model_vars['backbone'] = model # add model backbone
             model_vars.update(update_vars)
 
-            print(f'Initializing risk model with base model {args.model_name} and params:', update_vars)
+            print(f'Initializing risk model with backbone {args.model_name} and params:', update_vars)
             model = NAME_TO_MODEL_CLASS['risk_model'](**model_vars)
 
             # update model name
-            vars(args)['model_name'] = f'risk_model_{args.model_name}'
+            vars(args)['model_name'] = f'risk_{args.model_name}'
 
     return model
 

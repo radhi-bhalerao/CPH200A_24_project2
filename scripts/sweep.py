@@ -80,7 +80,7 @@ def update_datamodule_args(config):
     datamodule_vars.update({k:v for k,v in config.items() if k in datamodule_vars})
 
 if __name__ == '__main__':
-    for model_name in ['cnn']: #'mlp', 'linear', 'resnet'
+    for model_name in ['linear', 'mlp', 'cnn', 'resnet']:
         print(f'Running sweep for model "{model_name}"')
     
         # get search parameters
@@ -88,12 +88,12 @@ if __name__ == '__main__':
 
         # get sweep function
         train_model = get_train_model(model_name)
-        count = reduce(mul, [len(v['values']) for v in parameters.values()], 1)
+        count = reduce(mul, [len(v['values']) for v in parameters.values()], 1) # number of config trials to run
 
         # define sweep config
         sweep_config = {
             'method': 'grid',
-            'name': 'sweep_1.1',
+            'name': f'sweep_{model_name}',
             'metric': {
                 'goal': 'minimize',
                 'name': 'val_loss'
@@ -105,7 +105,9 @@ if __name__ == '__main__':
         sweep_id = wandb.sweep(sweep_config, 
                                project=train_model_args.project_name,
                                entity=train_model_args.wandb_entity)
-        
+
         wandb.agent(sweep_id=sweep_id, 
                     function=train_model, 
                     count=count)
+        
+        wandb.teardown()

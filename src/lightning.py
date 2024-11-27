@@ -591,7 +591,7 @@ class ResNet3D(Classifer):
         activation_map = self.backbone.layer4(features)  # Activation maps from the last conv layer
 
         # pooling
-        pooled_features = self.pool(activation_map).squeeze()
+        pooled_features = self.pool(activation_map).squeeze(dim=(2,3,4))
 
         if return_features:
             return pooled_features, activation_map
@@ -630,7 +630,7 @@ class Swin3DModel(Classifer):
         activation_map = x.permute(0, 4, 1, 2, 3)  # B, C, _T, _H, _W, Activation maps
 
         # pooling
-        pooled_features = self.pool(activation_map).squeeze()
+        pooled_features = self.pool(activation_map).squeeze(dim=(2,3,4))
 
         if return_features:
             return pooled_features, activation_map

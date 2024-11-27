@@ -36,6 +36,7 @@ class Classifer(pl.LightningModule):
 
         self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=self.num_classes)
         self.auc = torchmetrics.AUROC(task="binary" if self.num_classes == 2 else "multiclass", num_classes=self.num_classes)
+        self.confmat = torchmetrics.ConfusionMatrix(task="binary" if self.num_classes == 2 else "multiclass", num_classes=self.num_classes)
 
         self.training_outputs = []
         self.validation_outputs = []
@@ -119,6 +120,11 @@ class Classifer(pl.LightningModule):
         else:
             probs = F.softmax(y_hat, dim=-1)
         self.log("train_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for model predictions
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'train_{k}': v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
         self.training_outputs = []
 
     def on_validation_epoch_end(self):
@@ -129,6 +135,18 @@ class Classifer(pl.LightningModule):
         else:
             probs = F.softmax(y_hat, dim=-1)
         self.log("val_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for model predictions
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'val_{k}':v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for criteria (e.g. lungrads)
+        if self.trainer.datamodule.name == 'NLST':
+            criteria = torch.cat([o["y"] for o in self.validation_outputs])
+            criteria_conf_metrics = self.get_confmat_metrics(criteria, y)
+            self.log_dict({f'val_{k}_{self.trainer.datamodule.criteria}':v 
+                           for k,v in criteria_conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
         self.roc_analysis_across_nodes(self.validation_outputs, plot_label='val set')
         self.validation_outputs = []
 
@@ -142,6 +160,19 @@ class Classifer(pl.LightningModule):
             probs = F.softmax(y_hat, dim=-1)
 
         self.log("test_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for model prediction
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'test_{k}':v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for criteria (e.g. lungrads)
+        if self.trainer.datamodule.name == 'NLST':
+            criteria = torch.cat([o["y"] for o in self.test_outputs])
+            criteria_conf_metrics = self.get_confmat_metrics(criteria, y)
+            self.log_dict({f'test_{k}_{self.trainer.datamodule.criteria}':v 
+                           for k,v in criteria_conf_metrics.items()}, sync_dist=True, prog_bar=True)            
+
+
         self.roc_analysis_across_nodes(self.test_outputs, plot_label='test set')
         self.test_outputs = []
 
@@ -236,7 +267,6 @@ class Classifer(pl.LightningModule):
             if group_data:
                 wandb_logger.log_image(key=subgroup_plot_name, images=[subgroup_roc_plot])
 
-
     def generate_roc(self, y, y_hat, criteria):
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 8))
 
@@ -308,6 +338,28 @@ class Classifer(pl.LightningModule):
 
         return fig        
 
+    def get_confmat_metrics(self, y_hat, y, by_class=False):
+        # Calculate confusion matrix 
+        cm = self.confmat(y_hat, y) # axes: (true, predicted)
+
+        # get pos/neg count per class
+        TP = cm.diag()
+        FP = cm.sum(dim=0) - TP
+        FN = cm.sum(dim=1) - TP 
+        TN = cm.sum() - (FP + FN + TP)
+                
+        metric_dict = {
+            'sensitivity': TP/(TP+FN), # tpr
+            'specificity': TN/(TN+FN), # tnr
+            'precision': TP/(TP+FP), # ppv
+            'fpr': FP/(FP+TN),
+        }
+
+        if not by_class:
+            metric_dict = {k:v.mean() for k,v in metric_dict.items()}
+
+        return metric_dict
+    
 class MLP(Classifer):
     def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr=1e-3, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
@@ -463,7 +515,7 @@ class ResNet18(Classifer):
             self.classifier.apply(self.init_weights)
 
     def forward(self, x):
-        print('Size: ', x.size())
+        # print('Size: ', x.size())
         batch_size, channels, width, height = x.size()
         x = rearrange(x, 'b c w h -> b c h w')
         return self.classifier(x)
@@ -815,7 +867,7 @@ class RiskModel(Classifer):
         y_seq = torch.cat([o["y_seq"] for o in outputs])
         y_mask = torch.cat([o["y_mask"] for o in outputs])
 
-        # calculate auc by year
+        # calculate metrics by year
         for i in range(self.max_followup):
             '''
                 Filter samples for either valid negative (observed followup) at time i
@@ -823,7 +875,14 @@ class RiskModel(Classifer):
             '''
             valid_probs = y_hat[:, i][(y_mask[:, i] == 1) | (y_seq[:,i] == 1)]
             valid_labels = y_seq[:, i][(y_mask[:, i] == 1)| (y_seq[:,i] == 1)]
+
+            # auc
             self.log("{}_{}year_auc".format(stage, i+1), self.auc(valid_probs, valid_labels.view(-1)), sync_dist=True, prog_bar=True)
+
+            # confusion matrix metrics
+            confmat_metrics = self.get_confmat_metrics(valid_probs, valid_labels.int())
+            for metric_name, metric_value in confmat_metrics.items():
+                self.log(f"{stage}_{i+1}year_{metric_name}", metric_value, sync_dist=True, prog_bar=True)
 
         # calculate concordance index
         y = torch.cat([o["y"] for o in outputs])

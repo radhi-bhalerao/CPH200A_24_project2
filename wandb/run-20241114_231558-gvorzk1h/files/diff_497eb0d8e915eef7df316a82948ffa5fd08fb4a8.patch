@@ -1,0 +1,40 @@
+diff --git a/run_resnet18_adapt.sh b/run_resnet18_adapt.sh
+index 803fc7c..4fd6084 100644
+--- a/run_resnet18_adapt.sh
++++ b/run_resnet18_adapt.sh
+@@ -5,7 +5,7 @@ python /scratch/users/rbhalerao/CPH200A_project2/scripts/main.py \
+     --pretraining True \
+     --use_data_augmentation False \
+     --batch_size 2 \
+-    --num_workers 4 \
++    --num_workers 0 \
+     --project_name "cornerstone_project_2" \
+     --wandb_entity "cph29" \
+     --depth_handling "max_pool" 
+diff --git a/wandb/debug-internal.log b/wandb/debug-internal.log
+index 128d197..acb7299 120000
+--- a/wandb/debug-internal.log
++++ b/wandb/debug-internal.log
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox/logs/debug-internal.log
+\ No newline at end of file
++run-20241114_231558-gvorzk1h/logs/debug-internal.log
+\ No newline at end of file
+diff --git a/wandb/debug.log b/wandb/debug.log
+index 63781c6..6728738 120000
+--- a/wandb/debug.log
++++ b/wandb/debug.log
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox/logs/debug.log
+\ No newline at end of file
++run-20241114_231558-gvorzk1h/logs/debug.log
+\ No newline at end of file
+diff --git a/wandb/latest-run b/wandb/latest-run
+index 08c0084..298099a 120000
+--- a/wandb/latest-run
++++ b/wandb/latest-run
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox
+\ No newline at end of file
++run-20241114_231558-gvorzk1h
+\ No newline at end of file

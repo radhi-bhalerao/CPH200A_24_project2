@@ -1,0 +1,27 @@
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Current SDK version is 0.18.1
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Configure stats pid to 1356668
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Loading settings from /home/rbhalerao/.config/wandb/settings
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Loading settings from /scratch/users/rbhalerao/CPH200A_project2/wandb/settings
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Loading settings from environment variables: {}
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Applying setup settings: {'mode': None, '_disable_service': None}
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Inferring run settings from compute environment: {'program_relpath': 'scripts/main.py', 'program_abspath': '/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py', 'program': '/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py'}
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_setup.py:_flush():77] Applying login settings: {}
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_init.py:_log_setup():532] Logging user logs to ./wandb/run-20241123_055958-2xnovz0h/logs/debug.log
+2024-11-23 05:59:58,416 INFO    MainThread:1356668 [wandb_init.py:_log_setup():533] Logging internal logs to ./wandb/run-20241123_055958-2xnovz0h/logs/debug-internal.log
+2024-11-23 05:59:58,417 INFO    MainThread:1356668 [wandb_init.py:init():616] calling init triggers
+2024-11-23 05:59:58,417 INFO    MainThread:1356668 [wandb_init.py:init():623] wandb.init called with sweep_config: {}
+config: {}
+2024-11-23 05:59:58,417 INFO    MainThread:1356668 [wandb_init.py:init():666] starting backend
+2024-11-23 05:59:58,417 INFO    MainThread:1356668 [wandb_init.py:init():670] setting up manager
+2024-11-23 05:59:58,419 INFO    MainThread:1356668 [backend.py:_multiprocessing_setup():105] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2024-11-23 05:59:58,420 INFO    MainThread:1356668 [wandb_init.py:init():678] backend started and connected
+2024-11-23 05:59:58,424 INFO    MainThread:1356668 [wandb_init.py:init():773] updated telemetry
+2024-11-23 05:59:58,427 INFO    MainThread:1356668 [wandb_init.py:init():806] communicating run to backend with 90.0 second timeout
+2024-11-23 05:59:58,780 INFO    MainThread:1356668 [wandb_init.py:init():857] starting run threads in backend
+2024-11-23 05:59:58,917 INFO    MainThread:1356668 [wandb_run.py:_console_start():2459] atexit reg
+2024-11-23 05:59:58,917 INFO    MainThread:1356668 [wandb_run.py:_redirect():2307] redirect: wrap_raw
+2024-11-23 05:59:58,917 INFO    MainThread:1356668 [wandb_run.py:_redirect():2372] Wrapping output streams.
+2024-11-23 05:59:58,917 INFO    MainThread:1356668 [wandb_run.py:_redirect():2397] Redirects installed.
+2024-11-23 05:59:58,919 INFO    MainThread:1356668 [wandb_init.py:init():900] run started, returning control to user process
+2024-11-23 06:00:22,163 INFO    MainThread:1356668 [wandb_run.py:_config_callback():1388] config_cb None None {'num_classes': 9, 'init_lr': 0.001, 'pretraining': True, 'depth_handling': 'max_pool', 'num_channels': 3, 'use_data_augmentation': False, 'batch_size': 2, 'num_workers': 8, 'nlst_metadata_path': '/scratch/project2/nlst-metadata/full_nlst_google.json', 'valid_exam_path': '/scratch/project2/nlst-metadata/valid_exams.p', 'nlst_dir': '/scratch/project2/compressed', 'lungrads_path': '/scratch/project2/nlst-metadata/nlst_acc2lungrads.p', 'num_images': 200, 'max_followup': 6, 'img_size': [256, 256], 'class_balance': False, 'group_keys': ['race', 'educat', 'gender', 'age', 'ethnic'], 'feature_config': ['age']}
+2024-11-23 07:27:21,291 WARNING MsgRouterThr:1356668 [router.py:message_loop():77] message_loop has been closed

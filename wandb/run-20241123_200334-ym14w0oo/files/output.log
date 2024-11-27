@@ -1,0 +1,133 @@
+100%|███████████████████| 15000/15000 [00:00<00:00, 16986.10it/s]
+NLST Dataset. 28161 exams (417.0 with cancer in one year, 1444 cancer ever) from 9646 patients
+NLST Dataset. 6839 exams (99.0 with cancer in one year, 337 cancer ever) from 2336 patients
+NLST Dataset. 6479 exams (86.0 with cancer in one year, 320 cancer ever) from 2204 patients
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [1]
+
+  | Name       | Type               | Params | Mode
+----------------------------------------------------------
+0 | loss       | CrossEntropyLoss   | 0      | train
+1 | accuracy   | MulticlassAccuracy | 0      | train
+2 | auc        | MulticlassAUROC    | 0      | train
+3 | classifier | ResNet             | 11.2 M | train
+----------------------------------------------------------
+11.2 M    Trainable params
+0         Non-trainable params
+11.2 M    Total params
+44.725    Total estimated model params size (MB)
+71        Modules in train mode
+0         Modules in eval mode
+Epoch 0: 100%|█| 14081/14081 [5:29:06<00:00,  0.71it/s, v_num=w0o
+/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torchmetrics/utilities/prints.py:43: UserWarning: No negative samples in targets, false positive value should be meaningless. Returning zero tensor in false positive score
+  warnings.warn(*args, **kwargs)  # noqa: B028
+/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/torchmetrics/utilities/prints.py:43: UserWarning: No positive samples in targets, true positive value should be meaningless. Returning zero tensor in true positive score
+  warnings.warn(*args, **kwargs)  # noqa: B028
+                                                                 
+Traceback (most recent call last):
+  File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 337, in <module>
+    main(args)
+  File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 317, in main
+    trainer.fit(model, datamodule)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 538, in fit
+    call._call_and_handle_interrupt(
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 46, in _call_and_handle_interrupt
+    return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/launchers/subprocess_script.py", line 105, in launch
+    return function(*args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 574, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 981, in _run
+    results = self._run_stage()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1025, in _run_stage
+    self.fit_loop.run()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/fit_loop.py", line 206, in run
+    self.on_advance_end()
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/fit_loop.py", line 378, in on_advance_end
+    call._call_callback_hooks(trainer, "on_train_epoch_end", monitoring_callbacks=True)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 218, in _call_callback_hooks
+    fn(trainer, trainer.lightning_module, *args, **kwargs)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 325, in on_train_epoch_end
+    self._save_topk_checkpoint(trainer, monitor_candidates)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 385, in _save_topk_checkpoint
+    self._save_monitor_checkpoint(trainer, monitor_candidates)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 705, in _save_monitor_checkpoint
+    self._update_best_and_save(current, trainer, monitor_candidates)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 757, in _update_best_and_save
+    self._save_checkpoint(trainer, filepath)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 390, in _save_checkpoint
+    trainer.save_checkpoint(filepath, self.save_weights_only)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1364, in save_checkpoint
+    checkpoint = self._checkpoint_connector.dump_checkpoint(weights_only)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/checkpoint_connector.py", line 493, in dump_checkpoint
+    call._call_lightning_module_hook(trainer, "on_save_checkpoint", checkpoint)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 167, in _call_lightning_module_hook
+    output = fn(*args, **kwargs)
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 147, in on_save_checkpoint
+    self.roc_analysis_across_nodes(self.validation_outputs)
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 197, in roc_analysis_across_nodes
+    self.roc_analysis(y=output_across_nodes['y'],
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 215, in roc_analysis
+    roc_plot = self.generate_roc(y, y_hat, criteria)
+  File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 236, in generate_roc
+    RocCurveDisplay.from_predictions(y,
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/metrics/_plot/roc_curve.py", line 392, in from_predictions
+    pos_label_validated, name = cls._validate_from_predictions_params(
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/utils/_plotting.py", line 56, in _validate_from_predictions_params
+    check_consistent_length(y_true, y_pred, sample_weight)
+  File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/utils/validation.py", line 457, in check_consistent_length
+    raise ValueError(
+ValueError: Found input variables with inconsistent numbers of samples: [6839, 61551]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 337, in <module>
+[rank0]:     main(args)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/scripts/main.py", line 317, in main
+[rank0]:     trainer.fit(model, datamodule)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 538, in fit
+[rank0]:     call._call_and_handle_interrupt(
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 46, in _call_and_handle_interrupt
+[rank0]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/strategies/launchers/subprocess_script.py", line 105, in launch
+[rank0]:     return function(*args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 574, in _fit_impl
+[rank0]:     self._run(model, ckpt_path=ckpt_path)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 981, in _run
+[rank0]:     results = self._run_stage()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1025, in _run_stage
+[rank0]:     self.fit_loop.run()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/fit_loop.py", line 206, in run
+[rank0]:     self.on_advance_end()
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/loops/fit_loop.py", line 378, in on_advance_end
+[rank0]:     call._call_callback_hooks(trainer, "on_train_epoch_end", monitoring_callbacks=True)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 218, in _call_callback_hooks
+[rank0]:     fn(trainer, trainer.lightning_module, *args, **kwargs)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 325, in on_train_epoch_end
+[rank0]:     self._save_topk_checkpoint(trainer, monitor_candidates)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 385, in _save_topk_checkpoint
+[rank0]:     self._save_monitor_checkpoint(trainer, monitor_candidates)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 705, in _save_monitor_checkpoint
+[rank0]:     self._update_best_and_save(current, trainer, monitor_candidates)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 757, in _update_best_and_save
+[rank0]:     self._save_checkpoint(trainer, filepath)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py", line 390, in _save_checkpoint
+[rank0]:     trainer.save_checkpoint(filepath, self.save_weights_only)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/trainer.py", line 1364, in save_checkpoint
+[rank0]:     checkpoint = self._checkpoint_connector.dump_checkpoint(weights_only)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/checkpoint_connector.py", line 493, in dump_checkpoint
+[rank0]:     call._call_lightning_module_hook(trainer, "on_save_checkpoint", checkpoint)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/lightning/pytorch/trainer/call.py", line 167, in _call_lightning_module_hook
+[rank0]:     output = fn(*args, **kwargs)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 147, in on_save_checkpoint
+[rank0]:     self.roc_analysis_across_nodes(self.validation_outputs)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 197, in roc_analysis_across_nodes
+[rank0]:     self.roc_analysis(y=output_across_nodes['y'],
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 215, in roc_analysis
+[rank0]:     roc_plot = self.generate_roc(y, y_hat, criteria)
+[rank0]:   File "/scratch/users/rbhalerao/CPH200A_project2/src/lightning.py", line 236, in generate_roc
+[rank0]:     RocCurveDisplay.from_predictions(y,
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/metrics/_plot/roc_curve.py", line 392, in from_predictions
+[rank0]:     pos_label_validated, name = cls._validate_from_predictions_params(
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/utils/_plotting.py", line 56, in _validate_from_predictions_params
+[rank0]:     check_consistent_length(y_true, y_pred, sample_weight)
+[rank0]:   File "/home/rbhalerao/miniconda3/envs/shree/lib/python3.10/site-packages/sklearn/utils/validation.py", line 457, in check_consistent_length
+[rank0]:     raise ValueError(
+[rank0]: ValueError: Found input variables with inconsistent numbers of samples: [6839, 61551]

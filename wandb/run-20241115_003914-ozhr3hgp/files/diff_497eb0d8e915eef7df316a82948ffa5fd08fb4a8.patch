@@ -1,0 +1,65 @@
+diff --git a/run_resnet18_adapt.sh b/run_resnet18_adapt.sh
+index 803fc7c..d9cd9d8 100644
+--- a/run_resnet18_adapt.sh
++++ b/run_resnet18_adapt.sh
+@@ -1,11 +1,11 @@
+-python /scratch/users/rbhalerao/CPH200A_project2/scripts/main.py \
++CUDA_VISIBLE_DEVICES=1 python /scratch/users/rbhalerao/CPH200A_project2/scripts/main.py \
+     --model_name resnet_adapt \
+     --dataset_name nlst \
+     --train True \
+     --pretraining True \
+     --use_data_augmentation False \
+     --batch_size 2 \
+-    --num_workers 4 \
++    --num_workers 0 \
+     --project_name "cornerstone_project_2" \
+     --wandb_entity "cph29" \
+     --depth_handling "max_pool" 
+diff --git a/scripts/main.py b/scripts/main.py
+index 5d4588f..1ae81ad 100644
+--- a/scripts/main.py
++++ b/scripts/main.py
+@@ -14,6 +14,7 @@ import wandb
+ from torch.backends import cudnn
+ from lightning import seed_everything
+ import json
++import torch
+ 
+ dirname = os.path.dirname(__file__)
+ global_seed = json.load(open(os.path.join(dirname, '..', 'global_seed.json')))['global_seed']
+@@ -309,6 +310,7 @@ def main(args: argparse.Namespace):
+     logger = get_logger(args)
+     callbacks = get_callbacks(args)
+     trainer = get_trainer(args, callbacks=callbacks, logger=logger)
++    torch.cuda.set_per_process_memory_fraction(0.8, device=0)
+ 
+     if args.train:
+         print("Training model")
+diff --git a/wandb/debug-internal.log b/wandb/debug-internal.log
+index 128d197..5df8d95 120000
+--- a/wandb/debug-internal.log
++++ b/wandb/debug-internal.log
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox/logs/debug-internal.log
+\ No newline at end of file
++run-20241115_003914-ozhr3hgp/logs/debug-internal.log
+\ No newline at end of file
+diff --git a/wandb/debug.log b/wandb/debug.log
+index 63781c6..000fe52 120000
+--- a/wandb/debug.log
++++ b/wandb/debug.log
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox/logs/debug.log
+\ No newline at end of file
++run-20241115_003914-ozhr3hgp/logs/debug.log
+\ No newline at end of file
+diff --git a/wandb/latest-run b/wandb/latest-run
+index 08c0084..db34a79 120000
+--- a/wandb/latest-run
++++ b/wandb/latest-run
+@@ -1 +1 @@
+-run-20241114_195653-snr5hkox
+\ No newline at end of file
++run-20241115_003914-ozhr3hgp
+\ No newline at end of file

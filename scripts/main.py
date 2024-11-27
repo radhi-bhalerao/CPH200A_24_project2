@@ -279,12 +279,14 @@ def get_model(args):
     return model
 
 
-def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
+def get_trainer(args, strategy='ddp', logger=None, callbacks=[], devices=None):
     args.trainer.accelerator = 'auto'
     args.trainer.strategy = strategy if not args.risk else 'ddp_find_unused_parameters_true'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
     args.trainer.min_epochs = 20
+    if devices:
+        args.trainer.devices = devices
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)

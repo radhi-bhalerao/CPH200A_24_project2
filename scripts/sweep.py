@@ -57,7 +57,7 @@ def get_train_model(model_name):
         model = get_model(config)
         callbacks = get_callbacks(config)
         logger = get_logger(config)
-        trainer = get_trainer(config, strategy='ddp_notebook', logger=logger, callbacks=callbacks)
+        trainer = get_trainer(config, logger=logger, callbacks=callbacks, devices=1)
 
         # update wandb config
         wandb.config.update(vars(config))

@@ -189,6 +189,13 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="Maximum number of followups to predict"
     )
 
+    parser.add_argument(
+        "--disable_wandb",
+        action='store_true',
+        help="If set to True, disables wandb logging. Default is False."
+    )
+
+
     return parser
 
 def parse_args() -> argparse.Namespace:
@@ -302,12 +309,17 @@ def get_trainer(args, strategy='ddp', logger=None, callbacks=[], devices=None):
     return trainer
 
 def get_logger(args):
-    logger = pl.loggers.WandbLogger(project=args.project_name,
-                                    entity=args.wandb_entity,
-                                    group=args.model_name,
-                                    dir=os.path.join(dirname, '..'))
-
-    return logger
+    if args.disable_wandb:
+        print("wandb logging is disabled.")
+        return None
+    else:
+        logger = pl.loggers.WandbLogger(
+            project=args.project_name,
+            entity=args.wandb_entity,
+            group=args.model_name,
+            dir=os.path.join(dirname, '..')
+        )
+        return logger
 
 def get_callbacks(args):
     # set checkpoint save directory
@@ -366,9 +378,11 @@ def main(args: argparse.Namespace):
     print("Evaluating model on test set")
     trainer.test(model, datamodule)
 
-    if logger:
-        logger.finalize('success')
-    wandb.finish()
+    if not args.disable_wandb:
+        if logger:
+            logger.finalize('success')
+        wandb.finish()
+
 
     print("Done")
 

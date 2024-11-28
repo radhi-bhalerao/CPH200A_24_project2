@@ -5,7 +5,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel, ResNet3D, Swin3DModel, ResNet18_adapted
+from src.lightning import MLP, CNN, LinearModel, ResNet18, RiskModel, ResNet3D, Swin3DModel, ResNet18_adapted, CNN3D
 from src.dataset import PathMnist, NLST
 from lightning.pytorch.cli import LightningArgumentParser
 import lightning.pytorch as pl
@@ -196,6 +196,12 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
         help="If set to True, disables wandb logging. Default is False."
     )
 
+    parser.add_argument(
+        "--clinical_features",
+        default=['gender', 'age', 'pkyr'],
+        nargs='*',
+        help="The clincal features to include in the risk model."
+    )
 
     return parser
 
@@ -366,7 +372,7 @@ def main(args: argparse.Namespace):
     logger = get_logger(args)
     callbacks = get_callbacks(args)
     trainer = get_trainer(args, callbacks=callbacks, logger=logger)
-    torch.cuda.set_per_process_memory_fraction(0.8, device=0)
+    # torch.cuda.set_per_process_memory_fraction(0.8, device=0)
 
     if args.train:
         print("Training model")

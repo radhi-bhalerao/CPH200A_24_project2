@@ -58,7 +58,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     parser.add_argument(
         "--model_name",
         default="mlp",
-        choices=["mlp", "linear", "cnn", "cnn3d", "resnet", "resnet_adapt", "risk_model", "swin3d", "resnet3d"],  
+        choices=["mlp", "linear", "cnn", "cnn3d", "resnet", "resnet_adapt", "swin3d", "resnet3d"],  
         help="Name of model to use",
     )
 
@@ -152,7 +152,7 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
 
     parser.add_argument(
         "--batch_size",
-        default=4,
+        default=6,
         type=int,
         help="Number of samples per batch"
     )
@@ -165,11 +165,36 @@ def add_main_args(parser: LightningArgumentParser) -> LightningArgumentParser:
     )
 
     parser.add_argument(
-    "--depth_handling",
-    default="max_pool",
-    choices=["max_pool", "avg_pool", "slice_attention", "3d_conv"],
-    help="Method to handle depth dimension in ResNet18_adapted"
-)
+        "--depth_handling",
+        default="max_pool",
+        choices=["max_pool", "avg_pool", "slice_attention", "3d_conv"],
+        help="Method to handle depth dimension in ResNet18_adapted"
+    )
+
+    parser.add_argument(
+        "--risk",
+        action='store_true',
+        help="Whether to use the risk model"
+    )
+
+    parser.add_argument(
+        "--risk_model_checkpoint_path",
+        default=None,
+        help="Path to checkpoint to load the risk model from. If None, init from scratch. Unused if risk_model == False"
+    )
+
+    parser.add_argument(
+        "--max_followup",
+        default=1,
+        type=int,
+        help="Maximum number of followups to predict"
+    )
+
+    parser.add_argument(
+        "--disable_wandb",
+        action='store_true',
+        help="If set to True, disables wandb logging. Default is False."
+    )
 
 
     return parser
@@ -214,35 +239,62 @@ def get_datamodule(args):
     return datamodule
 
 def get_model(args):
-    print(f"Initializing {args.model_name} model")
+    # Initialize the risk model from a checkpoint
+    if args.risk and args.risk_model_checkpoint_path:
+        print(f'Loading saved risk model from checkpoint')
+        model = NAME_TO_MODEL_CLASS['risk_model'].load_from_checkpoint(args.risk_model_checkpoint_path)  
+        
+        # get backbone string
+        backbone_str = list(NAME_TO_MODEL_CLASS.keys())[list(NAME_TO_MODEL_CLASS.values()).index(type(model.model))]
     
-    # Check if the model is `resnet_adapt` to handle the specific `depth_handling` parameter
-    if args.model_name == "resnet_adapt":
-        model_vars = vars(vars(args)[args.model_name])
-        update_vars = {k: v for k, v in vars(args).items() if k in model_vars or k == 'depth_handling'}
-        model_vars.update(update_vars)
+        # update model name
+        vars(args)['model_name'] = f'risk_{backbone_str}'  
+
     else:
-        # General model initialization without `depth_handling`
+        # update default model params from args
         model_vars = vars(vars(args)[args.model_name])
         update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
         model_vars.update(update_vars)
     
-    # Initialize the model either from scratch or from a checkpoint
-    if args.checkpoint_path is None:
-        print('with params ', model_vars)
-        model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
-    else:
-        model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
+        # Initialize the model either from scratch or from a checkpoint
+        if args.checkpoint_path is None:
+            print(f'Initializing {args.model_name} with params:', model_vars)
+            model = NAME_TO_MODEL_CLASS[args.model_name](**model_vars)
+        else:
+            print(f'Loading saved {args.model_name} from checkpoint')
+            model = NAME_TO_MODEL_CLASS[args.model_name].load_from_checkpoint(args.checkpoint_path)
+
+        # Initialize the risk model from scratch
+        if args.risk and args.risk_model_checkpoint_path is None: 
+
+            # freeze backbone weights if from checkpoint
+            if args.checkpoint_path is not None:
+                for param in model.parameters():
+                    param.requires_grad = False
+            
+            # update default risk model params from args
+            model_vars = vars(vars(args)['risk_model'])
+            update_vars = {k: v for k, v in vars(args).items() if k in model_vars}
+            model_vars['backbone'] = model # add model backbone
+            model_vars.update(update_vars)
+
+            print(f'Initializing risk model with backbone {args.model_name} and params:', update_vars)
+            model = NAME_TO_MODEL_CLASS['risk_model'](**model_vars)
+
+            # update model name
+            vars(args)['model_name'] = f'risk_{args.model_name}'
 
     return model
 
 
-def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
+def get_trainer(args, strategy='ddp', logger=None, callbacks=[], devices=None):
     args.trainer.accelerator = 'auto'
-    args.trainer.strategy = strategy
+    args.trainer.strategy = strategy if not args.risk else 'ddp_find_unused_parameters_true'
     args.trainer.logger = logger
     args.trainer.precision = "bf16-mixed" ## This mixed precision training is highly recommended
-    args.trainer.min_epochs = 100
+    args.trainer.min_epochs = 20
+    if devices:
+        args.trainer.devices = devices
 
     # set checkpoint save directory
     dirpath = os.path.join(dirname, '../models', args.model_name)
@@ -258,12 +310,17 @@ def get_trainer(args, strategy='ddp', logger=None, callbacks=[]):
     return trainer
 
 def get_logger(args):
-    logger = pl.loggers.WandbLogger(project=args.project_name,
-                                    entity=args.wandb_entity,
-                                    group=args.model_name,
-                                    dir=os.path.join(dirname, '..'))
-
-    return logger
+    if args.disable_wandb:
+        print("wandb logging is disabled.")
+        return None
+    else:
+        logger = pl.loggers.WandbLogger(
+            project=args.project_name,
+            entity=args.wandb_entity,
+            group=args.model_name,
+            dir=os.path.join(dirname, '..')
+        )
+        return logger
 
 def get_callbacks(args):
     # set checkpoint save directory
@@ -278,7 +335,6 @@ def get_callbacks(args):
             dirpath=dirpath,
             filename=args.model_name + '-{epoch:002d}-{val_loss:.2f}',
             save_last=True,
-            every_n_epochs=1
         ),
         pl.callbacks.EarlyStopping(
             monitor=args.monitor_key,
@@ -316,7 +372,7 @@ def main(args: argparse.Namespace):
         print("Training model")
         trainer.fit(model, datamodule)
 
-    print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
+        print("Best model checkpoint path: ", trainer.checkpoint_callback.best_model_path)
 
     print("Evaluating model on validation set")
     trainer.validate(model, datamodule)
@@ -324,9 +380,11 @@ def main(args: argparse.Namespace):
     print("Evaluating model on test set")
     trainer.test(model, datamodule)
 
-    if logger:
-        logger.finalize('success')
-    wandb.finish()
+    if not args.disable_wandb:
+        if logger:
+            logger.finalize('success')
+        wandb.finish()
+
 
     print("Done")
 

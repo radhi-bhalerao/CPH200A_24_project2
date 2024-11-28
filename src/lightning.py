@@ -15,10 +15,12 @@ import os
 from math import ceil
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.pyplot import cm
 from sklearn.metrics import RocCurveDisplay, roc_curve
 from NLST_data_dict import subgroup_dict
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
+from einops.layers.torch import Reduce
 
 dirname = os.path.dirname(__file__)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
@@ -34,6 +36,7 @@ class Classifer(pl.LightningModule):
 
         self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=self.num_classes)
         self.auc = torchmetrics.AUROC(task="binary" if self.num_classes == 2 else "multiclass", num_classes=self.num_classes)
+        self.confmat = torchmetrics.ConfusionMatrix(task="binary" if self.num_classes == 2 else "multiclass", num_classes=self.num_classes)
 
         self.training_outputs = []
         self.validation_outputs = []
@@ -103,8 +106,8 @@ class Classifer(pl.LightningModule):
         })
 
         if self.trainer.datamodule.name == 'NLST':
-            self.validation_outputs[-1].update({
-                            "criteria": batch[self.trainer.datamodule.criteria],
+            self.test_outputs[-1].update({
+                             "criteria": batch[self.trainer.datamodule.criteria],
                             **{k:batch[k] for k in self.trainer.datamodule.group_keys},
             })
         return loss
@@ -117,6 +120,11 @@ class Classifer(pl.LightningModule):
         else:
             probs = F.softmax(y_hat, dim=-1)
         self.log("train_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for model predictions
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'train_{k}': v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
         self.training_outputs = []
 
     def on_validation_epoch_end(self):
@@ -128,7 +136,18 @@ class Classifer(pl.LightningModule):
             probs = F.softmax(y_hat, dim=-1)
         self.log("val_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
 
-    def on_validation_start(self):
+        # confusion matrix metrics for model predictions
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'val_{k}':v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for criteria (e.g. lungrads)
+        if self.trainer.datamodule.name == 'NLST':
+            criteria = torch.cat([o["y"] for o in self.validation_outputs])
+            criteria_conf_metrics = self.get_confmat_metrics(criteria, y)
+            self.log_dict({f'val_{k}_{self.trainer.datamodule.criteria}':v 
+                           for k,v in criteria_conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
+        self.roc_analysis_across_nodes(self.validation_outputs, plot_label='val set')
         self.validation_outputs = []
 
     def on_test_epoch_end(self):
@@ -141,11 +160,21 @@ class Classifer(pl.LightningModule):
             probs = F.softmax(y_hat, dim=-1)
 
         self.log("test_auc", self.auc(probs, y.view(-1)), sync_dist=True, prog_bar=True)
-        self.test_outputs = []
 
-    def on_save_checkpoint(self, checkpoint):
-        self.roc_analysis_across_nodes(self.validation_outputs)        
-        return super().on_save_checkpoint(checkpoint)
+        # confusion matrix metrics for model prediction
+        conf_metrics = self.get_confmat_metrics(probs if self.num_classes==2 else probs.argmax(dim=1), y)
+        self.log_dict({f'test_{k}':v for k,v in conf_metrics.items()}, sync_dist=True, prog_bar=True)
+
+        # confusion matrix metrics for criteria (e.g. lungrads)
+        if self.trainer.datamodule.name == 'NLST':
+            criteria = torch.cat([o["y"] for o in self.test_outputs])
+            criteria_conf_metrics = self.get_confmat_metrics(criteria, y)
+            self.log_dict({f'test_{k}_{self.trainer.datamodule.criteria}':v 
+                           for k,v in criteria_conf_metrics.items()}, sync_dist=True, prog_bar=True)            
+
+
+        self.roc_analysis_across_nodes(self.test_outputs, plot_label='test set')
+        self.test_outputs = []
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.init_lr)
@@ -158,24 +187,16 @@ class Classifer(pl.LightningModule):
         elif isinstance(m, nn.Linear):
             nn.init.kaiming_uniform_(m.weight, nonlinearity=nonlinearity)
 
-    def roc_analysis_across_nodes(self, split_outputs):
+    def roc_analysis_across_nodes(self, split_outputs, plot_label='val set'):
         if self.trainer.datamodule.name == 'NLST':
-            # collect outputs across samples into a single tensor
-            output_across_samples = {}
-            for k in ['y', 'y_hat', 'criteria', *self.trainer.datamodule.group_keys]:
-                output = torch.cat([o[k] for o in split_outputs])
-                if k == 'y_hat':
-                    if self.num_classes == 2:
-                        output = F.softmax(output, dim=-1)[:,-1]
-                    else:
-                        output = F.softmax(output, dim=-1)
-                output = output.view(-1)
-                output_across_samples.update({k: output})
+            output_across_samples = self.get_outputs_across_samples(split_outputs)
             
-            # init empty tensors to gather tensors across notes
+            # init empty tensors to gather tensors across nodes
             output_across_nodes = {}
             for k,v in output_across_samples.items():
-                output_across_nodes[k] = torch.zeros((int(self.trainer.world_size * len(v)))).type(v.type()).to(self.device).contiguous()
+                node_v_size = list(v.size())
+                node_v_size[0] *= self.trainer.world_size
+                output_across_nodes[k] = torch.zeros(node_v_size).type(v.type()).to(self.device).contiguous()
 
             # wait for all nodes to catch up
             torch.distributed.barrier()
@@ -194,33 +215,50 @@ class Classifer(pl.LightningModule):
                         output_across_nodes.update(self.trainer.datamodule.vectorizer.transform({k: output_across_nodes[k]}))
                     
                 # print(probs, y.view(-1), group_data) # samples are 2x batch_size
-                self.roc_analysis(y=output_across_nodes['y'], 
-                                    y_hat=output_across_nodes['y_hat'],
-                                    criteria=output_across_nodes['criteria'],
-                                    group_data={k:v for k,v in output_across_nodes.items() if k in self.trainer.datamodule.group_keys},
-                                    plot_label='val set'
-                                    )
+                self.roc_analysis(output_across_nodes=output_across_nodes,
+                                  plot_label=plot_label)
+                
+    def get_outputs_across_samples(self, split_outputs, output_keys=['y', 'y_hat', 'criteria']):
+        # collect outputs across samples into a single tensor
+        output_across_samples = {}
+        for k in [*output_keys, *self.trainer.datamodule.group_keys]: 
+            output = torch.cat([o[k] for o in split_outputs])
+            if k == 'y_hat':
+                if self.num_classes == 2:
+                    output = F.softmax(output, dim=-1)[:,-1]
+                else:
+                    output = F.softmax(output, dim=-1)
+            output = output.view(-1)
+            output_across_samples.update({k: output})
+        
+        return output_across_samples
 
     @ staticmethod
     def safely_to_numpy(tensor):
         return tensor.to(torch.float).cpu().numpy().squeeze()
 
     @staticmethod
-    def plot_roc_operation_point(y, y_hat, ax, plot_label):
+    def plot_roc_operation_point(y, y_hat, ax, plot_label, color='g'):
         fpr, tpr, _ = roc_curve(y, y_hat)
-        ax.plot(fpr[1], tpr[1], 'go', label=f'{plot_label} operation point')
+        ax.plot(fpr[1], tpr[1], color=color, marker='o', linestyle='None', label=f'{plot_label} operation point')
     
-    def roc_analysis(self, y, y_hat, criteria, plot_label, group_data=None):
+    def roc_analysis(self, output_across_nodes, plot_label):
+        # unpack data
+        y = output_across_nodes['y']
+        y_hat = output_across_nodes['y_hat']
+        criteria = output_across_nodes['criteria']
+        group_data = {k:v for k,v in output_across_nodes.items() if k in self.trainer.datamodule.group_keys}
+
         # generate plots
         roc_plot = self.generate_roc(y, y_hat, criteria)
         print('ROC curve generated.')
         if group_data:
-            subgroup_roc_plot = self.generate_subgroup_roc(y, y_hat, criteria, group_data)
+            subgroup_roc_plot = self.generate_subgroup_roc(y, y_hat, criteria, group_data, plot_label=self.trainer.datamodule.criteria)
             print('Subgroup ROC curve generated.')
         
         # generate plot names
-        plot_name = f'ROC, {plot_label}, epoch {self.current_epoch}'
-        subgroup_plot_name = f'ROC by subgroups, {plot_label}, epoch {self.current_epoch}'
+        plot_name = f'ROC, {plot_label}, epoch{self.current_epoch}'
+        subgroup_plot_name = f'ROC by subgroups, {plot_label}, epoch{self.current_epoch}'
         
         # log plots
         if self.logger.experiment:
@@ -229,26 +267,26 @@ class Classifer(pl.LightningModule):
             if group_data:
                 wandb_logger.log_image(key=subgroup_plot_name, images=[subgroup_roc_plot])
 
-
     def generate_roc(self, y, y_hat, criteria):
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 8))
 
-        RocCurveDisplay.from_predictions(y,
-                                        y_hat,
-                                        name=None,
-                                        plot_chance_level=True,
-                                        ax=ax)
-                    
         self.plot_roc_operation_point(y,
                                       criteria,
                                       ax=ax,
                                       plot_label=self.trainer.datamodule.criteria)
 
+        RocCurveDisplay.from_predictions(y,
+                                         y_hat,
+                                         name=None,
+                                         plot_chance_level=True,
+                                         ax=ax)
+
         ax.legend(loc='lower right', prop={'size': 8})
+        plt.close()
 
         return fig
 
-    def generate_subgroup_roc(self, y, y_hat, criteria, group_data):
+    def generate_subgroup_roc(self, y, y_hat, criteria, group_data, plot_label):
         # set up figure
         ncols = 2
         nrows = ceil(len(group_data)/ncols)
@@ -256,9 +294,14 @@ class Classifer(pl.LightningModule):
         axs = axs.ravel()
         axs_count = 0
 
-        for group_key, group_i in group_data.items():
+        for group_key, group_i in group_data.items():            
+            # Plot operation point for_criteria
+            self.plot_roc_operation_point(y,
+                                          criteria,
+                                          ax=axs[axs_count],
+                                          plot_label=plot_label)
+            
             subgroups = np.unique(group_i)
-
             for j, subgroup in enumerate(subgroups):
                 # get group indices
                 subgroup_idxs = np.argwhere(group_i == subgroup)
@@ -282,12 +325,6 @@ class Classifer(pl.LightningModule):
                                                  y_hat[subgroup_idxs], 
                                                  **roc_kwargs)
             
-            # Plot operation point for_criteria
-            self.plot_roc_operation_point(y[subgroup_idxs],
-                                          criteria[subgroup_idxs],
-                                          ax=axs[axs_count],
-                                          plot_label=self.trainer.datamodule.criteria)
-
             axs[axs_count].grid()
             axs[axs_count].legend(loc='lower right', prop={'size': 8})
             axs_count += 1
@@ -297,9 +334,32 @@ class Classifer(pl.LightningModule):
             fig.delaxes(axs[i])
 
         plt.tight_layout()
+        plt.close()
 
         return fig        
 
+    def get_confmat_metrics(self, y_hat, y, by_class=False):
+        # Calculate confusion matrix 
+        cm = self.confmat(y_hat, y) # axes: (true, predicted)
+
+        # get pos/neg count per class
+        TP = cm.diag()
+        FP = cm.sum(dim=0) - TP
+        FN = cm.sum(dim=1) - TP 
+        TN = cm.sum() - (FP + FN + TP)
+                
+        metric_dict = {
+            'sensitivity': TP/(TP+FN), # tpr
+            'specificity': TN/(TN+FN), # tnr
+            'precision': TP/(TP+FP), # ppv
+            'fpr': FP/(FP+TN),
+        }
+
+        if not by_class:
+            metric_dict = {k:v.mean() for k,v in metric_dict.items()}
+
+        return metric_dict
+    
 class MLP(Classifer):
     def __init__(self, input_dim=28*28*3, hidden_dim=128, num_layers=1, num_classes=9, use_bn=False, init_lr=1e-3, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
@@ -601,7 +661,7 @@ class ResNet18(Classifer):
             self.classifier.apply(self.init_weights)
 
     def forward(self, x):
-        print('Size: ', x.size())
+        # print('Size: ', x.size())
         batch_size, channels, width, height = x.size()
         x = rearrange(x, 'b c w h -> b c h w')
         return self.classifier(x)
@@ -706,36 +766,77 @@ class ResNet3D(Classifer):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
-        if pretraining:
-            backbone = r3d_18(weights=R3D_18_Weights.DEFAULT)
-        else:
-            backbone = r3d_18(weights=None)
-        
-        # Modify the classifier
-        num_features = backbone.fc.in_features
-        backbone.fc = nn.Linear(num_features, num_classes)
-        self.model = backbone
+        # Load the pretrained ResNet3D model
+        weights_kwargs = {'weights': R3D_18_Weights.DEFAULT} if pretraining else {}
+        self.backbone = r3d_18(**weights_kwargs)
 
-    def forward(self, x):
-        return self.model(x)
+        # Modify the model to remove the original classification head
+        num_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Identity()  # Remove the fully connected layer
+
+        # Define pooling operation
+        self.pool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
+
+        # Define a new classification head
+        self.classification_head = nn.Linear(num_features, num_classes)
+
+    def forward(self, x, return_features=False):
+        # Pass input through the backbone
+        features = self.backbone.stem(x)
+        features = self.backbone.layer1(features)
+        features = self.backbone.layer2(features)
+        features = self.backbone.layer3(features)
+        activation_map = self.backbone.layer4(features)  # Activation maps from the last conv layer
+
+        # pooling
+        pooled_features = self.pool(activation_map).squeeze(dim=(2,3,4))
+
+        if return_features:
+            return pooled_features, activation_map
+        else:
+            # class prediction
+            logits = self.classification_head(pooled_features)
+            return logits
 
 class Swin3DModel(Classifer):
     def __init__(self, num_classes=2, init_lr=1e-3, pretraining=True, num_channels=3, **kwargs):
         super().__init__(num_classes=num_classes, init_lr=init_lr)
         self.save_hyperparameters()
 
+        # Load the pretrained Swin3D model
         if pretraining:
             weights = Swin3D_B_Weights.DEFAULT
-            self.model = swin3d_b(weights=weights)
+            self.backbone = swin3d_b(weights=weights)
         else:
-            self.model = swin3d_b(weights=None)
+            self.backbone = swin3d_b(weights=None)
 
-        in_features = self.model.head.in_features
-        self.model.head = nn.Linear(in_features, num_classes)
+        in_features = self.backbone.head.in_features
+        self.backbone.head = nn.Identity()  # Remove the original head
 
-    def forward(self, x):
-        return self.model(x)
+        # Define pooling operation
+        self.pool = Reduce('b c d h w -> b c 1 1 1', 'max') # max pooling
 
+        # Define a new classification head
+        self.classification_head = nn.Linear(in_features, num_classes)
+
+    def forward(self, x, return_features=False):
+        # Extract features using the backbone
+        x = self.backbone.patch_embed(x)  # B _T _H _W C
+        x = self.backbone.pos_drop(x)
+        x = self.backbone.features(x)  # B _T _H _W C 
+        x = self.backbone.norm(x)
+        activation_map = x.permute(0, 4, 1, 2, 3)  # B, C, _T, _H, _W, Activation maps
+
+        # pooling
+        pooled_features = self.pool(activation_map).squeeze(dim=(2,3,4))
+
+        if return_features:
+            return pooled_features, activation_map
+        else:
+            # class prediction
+            logits = self.classification_head(pooled_features)
+            return logits
+    
 
 NLST_CENSORING_DIST = {
     "0": 0.9851928130104401,
@@ -746,23 +847,58 @@ NLST_CENSORING_DIST = {
     "5": 0.9461840310101468,
 }
 
-class RiskModel(Classifer):
-    def __init__(self, input_num_chan=1, num_classes=2, init_lr = 1e-3, max_followup=6, **kwargs):
-        super().__init__(num_classes=num_classes, init_lr=init_lr)
-        self.save_hyperparameters()
+class Cumulative_Probability_Layer(nn.Module):
+    # adapted from: https://github.com/yala/Mirai/blob/master/onconet/models/cumulative_probability_layer.py
+    def __init__(self, num_features, max_followup):
+        super(Cumulative_Probability_Layer, self).__init__()
 
-        self.hidden_dim = 512
+        # init model components
+        self.hazard_fc = nn.Linear(num_features, max_followup) # hazard risk
+        self.base_hazard_fc = nn.Linear(num_features, 1)  # baseline risk
+        self.relu = nn.ReLU(inplace=True)
 
-        ## Maximum number of followups to predict (set to 6 for full risk prediction task)
-        self.max_followup = max_followup
-
-        # TODO: Initalize components of your model here
-        raise NotImplementedError("Not implemented yet")
-
-
+    def hazards(self, x):
+        raw_hazard = self.hazard_fc(x)
+        pos_hazard = self.relu(raw_hazard) # enforce positive hazard scores
+        return pos_hazard
 
     def forward(self, x):
-        raise NotImplementedError("Not implemented yet")
+        hazards = self.hazards(x)
+        cum_prob = torch.cumsum(hazards, dim=1) + self.base_hazard_fc(x)
+        return cum_prob # logits
+
+class RiskModel(Classifer):
+    def __init__(self, num_classes=2, init_lr=1e-3, max_followup=6, backbone=None, **kwargs):
+        super().__init__(num_classes=num_classes, init_lr=init_lr)
+        self.save_hyperparameters()
+        self.max_followup = max_followup
+
+        # Use the modified ResNet3D model directly
+        self.backbone = backbone  # Assume backbone is an instance of the modified ResNet3D
+
+        # Define classification head
+        self.classification_head = Cumulative_Probability_Layer(num_features=backbone.classification_head.in_features,
+                                                                max_followup=self.max_followup)
+
+        # Define loss functions
+        self.classification_loss_fn = nn.BCEWithLogitsLoss()
+        self.localization_loss_fn = nn.BCEWithLogitsLoss()
+
+        # Initialize metrics
+        self.auc = torchmetrics.AUROC(task="binary")
+        self.iou_metric = torchmetrics.JaccardIndex(task="binary")
+        self.dice_metric = torchmetrics.Dice()
+
+    def forward(self, x, return_features=False):
+        # Get logits and activation maps from the backbone
+        pooled_features, activation_map = self.backbone(x, return_features=True)
+
+        logits = self.classification_head(pooled_features)
+
+        if return_features:
+            return logits, activation_map
+        else:
+            return logits
 
     def get_xy(self, batch):
         """
@@ -775,46 +911,109 @@ class RiskModel(Classifer):
                 Hint: You may want to change the mask definition to suit your localization method
 
         """
-        return batch['x'], batch['y_seq'][:, :self.max_followup], batch['y_mask'][:, :self.max_followup], batch['mask']
+        x = batch['x']
+        y_seq = batch['y_seq'][:, :self.max_followup]
+        y_mask = batch['y_mask'][:, :self.max_followup]
+
+        region_annotation_mask = batch['mask']
+        region_annotation_mask = (region_annotation_mask > 0).float()
+
+        # # Debug statements
+        # print(f"x shape: {x.shape}")  # Expected: (B, C, D, W, H)
+        # print(f"y_seq shape: {y_seq.shape}")  # Expected: (B, T)
+        # print(f"y_mask shape: {y_mask.shape}")  # Expected: (B, T)
+        # print(f"region_annotation_mask shape: {region_annotation_mask.shape}")  # Expected: (B, D, W, H)")
+        # print(f"region_annotation_mask unique values: {region_annotation_mask.unique()}")  # Should be [0, 1]
+        
+        return x, y_seq, y_mask, region_annotation_mask
+
 
     def step(self, batch, batch_idx, stage, outputs):
         x, y_seq, y_mask, region_annotation_mask = self.get_xy(batch)
-
-        # TODO: Get risk scores from your model
-        y_hat = None ## (B, T) shape tensor of risk scores.
-        # TODO: Compute your loss (with or without localization)
-        loss = None
-
-        raise NotImplementedError("Not implemented yet")
         
-        # TODO: Log any metrics you want to wandb
-        metric_value = -1
-        metric_name = "dummy_metric"
-        self.log('{}_{}'.format(stage, metric_name), metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
-
-        # TODO: Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation.
+        # Get risk scores and activation maps from your model
+        y_hat, activation_map = self.forward(x, return_features=True)  # y_hat: (B, T), activation_map: (B, C, D, H, W)
+        
+        # Compute classification loss (risk prediction loss)
+        # Mask for right-censored follow-up in patients without cancer
+        mask = torch.logical_or(torch.cumsum(y_seq, dim=1) > 0, y_mask)  # Corrected dim from 0 to 1
+        classification_loss = F.binary_cross_entropy_with_logits(y_hat, y_seq, reduction='none')
+        classification_loss = (classification_loss * mask).sum() / mask.sum()  # Masked average
+        
+        # Process activation map for localization loss
+        # Average over channel dimension to get attention map
+        attention_map = activation_map.mean(dim=1, keepdim=True)  # Shape: (B, 1, D, H, W)
+        
+        # Resize attention map to match ground truth mask
+        attention_map_resized = F.interpolate(
+            attention_map, size=region_annotation_mask.shape[2:], mode='trilinear', align_corners=False
+        )
+        
+        # Normalize attention map
+        attention_map_normalized = (attention_map_resized - attention_map_resized.min()) / (
+            attention_map_resized.max() - attention_map_resized.min() + 1e-8
+        )
+        
+        # Compute localization loss
+        localization_loss = self.localization_loss_fn(
+            attention_map_normalized, region_annotation_mask.float()
+        )
+        
+        # Total loss
+        lambda_loc = 0.5  # Adjust this weight as needed
+        loss = classification_loss + lambda_loc * localization_loss
+        
+        # Log metrics
+        metric_dict = {
+            'classification_loss': classification_loss,
+            'localization_loss': localization_loss,
+            'loss': loss  # must reflect monitor_key in EarlyStopping callback
+        }
+        
+        # Compute accuracy for each year
+        for year in range(self.max_followup):
+            if mask[:, year].sum() > 0:  # If any valid samples in year
+                year_acc = self.accuracy(
+                    y_hat[:, year][mask[:, year]],
+                    y_seq[:, year][mask[:, year]]
+                )
+            else:
+                year_acc = float('nan')
+            metric_dict.update({f'{year+1}year_acc': year_acc})
+        
+        # Log metrics to wandb
+        for metric_name, metric_value in metric_dict.items():
+            self.log(f'{stage}_{metric_name}', metric_value, prog_bar=True, on_epoch=True, on_step=True, sync_dist=True)
+        
+        # Store the predictions and labels for use at the end of the epoch for AUC and C-Index computation
         outputs.append({
-            "y_hat": y_hat, # Logits for all risk scores
-            "y_mask": y_mask, # Tensor of when the patient was observed
-            "y_seq": y_seq, # Tensor of when the patient had cancer
-            "y": batch["y"], # If patient has cancer within 6 years
-            "time_at_event": batch["time_at_event"] # Censor time
+            "y_hat": y_hat.detach(),  # Logits for all risk scores
+            "y_mask": y_mask,  # Tensor of when the patient was observed
+            "y_seq": y_seq,  # Tensor of when the patient had cancer
+            "y": batch["y"],  # If patient has cancer within 6 years (bool)
+            "time_at_event": batch["time_at_event"],  # Censor time (int)
+            "attention_map": attention_map_normalized.detach(),
+            "true_masks": region_annotation_mask,
+            "criteria": batch[self.trainer.datamodule.criteria],
+            **{k: batch[k] for k in self.trainer.datamodule.group_keys}
         })
-
+        
         return loss
+    
+    
     def training_step(self, batch, batch_idx):
         return self.step(batch, batch_idx, "train", self.training_outputs)
-
     def validation_step(self, batch, batch_idx):
         return self.step(batch, batch_idx, "val", self.validation_outputs)
     def test_step(self, batch, batch_idx):
         return self.step(batch, batch_idx, "test", self.test_outputs)
 
     def on_epoch_end(self, stage, outputs):
-        y_hat = F.sigmoid(torch.cat([o["y_hat"] for o in outputs]))
+        y_hat = F.sigmoid(torch.cat([o["y_hat"] for o in outputs])) # get probabilities from logits
         y_seq = torch.cat([o["y_seq"] for o in outputs])
         y_mask = torch.cat([o["y_mask"] for o in outputs])
 
+        # calculate metrics by year
         for i in range(self.max_followup):
             '''
                 Filter samples for either valid negative (observed followup) at time i
@@ -822,8 +1021,16 @@ class RiskModel(Classifer):
             '''
             valid_probs = y_hat[:, i][(y_mask[:, i] == 1) | (y_seq[:,i] == 1)]
             valid_labels = y_seq[:, i][(y_mask[:, i] == 1)| (y_seq[:,i] == 1)]
+
+            # auc
             self.log("{}_{}year_auc".format(stage, i+1), self.auc(valid_probs, valid_labels.view(-1)), sync_dist=True, prog_bar=True)
 
+            # confusion matrix metrics
+            confmat_metrics = self.get_confmat_metrics(valid_probs, valid_labels.int())
+            for metric_name, metric_value in confmat_metrics.items():
+                self.log(f"{stage}_{i+1}year_{metric_name}", metric_value, sync_dist=True, prog_bar=True)
+
+        # calculate concordance index
         y = torch.cat([o["y"] for o in outputs])
         time_at_event = torch.cat([o["time_at_event"] for o in outputs])
 
@@ -833,14 +1040,103 @@ class RiskModel(Classifer):
             c_index = 0
         self.log("{}_c_index".format(stage), c_index, sync_dist=True, prog_bar=True)
 
+        # Compute localization metrics
+        attention_maps = torch.cat([o["attention_map"] for o in outputs])
+        true_masks = torch.cat([o["true_masks"] for o in outputs])
+
+        iou_score = self.iou_metric(attention_maps, true_masks.int())
+        dice_score = self.dice_metric(attention_maps, true_masks.int())
+
+        self.log(f'{stage}_IoU', iou_score, sync_dist=True, prog_bar=True)
+        self.log(f'{stage}_Dice', dice_score, sync_dist=True, prog_bar=True)
+
     def on_train_epoch_end(self):
         self.on_epoch_end("train", self.training_outputs)
         self.training_outputs = []
 
     def on_validation_epoch_end(self):
         self.on_epoch_end("val", self.validation_outputs)
+        self.roc_analysis_across_nodes(self.validation_outputs, 'val set')
         self.validation_outputs = []
 
     def on_test_epoch_end(self):
         self.on_epoch_end("test", self.test_outputs)
+        self.roc_analysis_across_nodes(self.test_outputs, 'test set')
         self.test_outputs = []
+
+    def get_outputs_across_samples(self, split_outputs, output_keys=['y_seq', 'y_hat', 'y_mask', 'criteria']):
+        # collect outputs across samples into a single tensor
+        output_across_samples = {}
+        for k in [*output_keys, *self.trainer.datamodule.group_keys]: 
+            output = torch.cat([o[k] for o in split_outputs])
+            if k == 'y_hat':
+                output = F.sigmoid(output)
+            output_across_samples.update({k: output})
+        
+        return output_across_samples
+
+    def roc_analysis(self, output_across_nodes, plot_label):
+        # unpack data
+        y_seq = np.where(output_across_nodes['y_mask'], output_across_nodes['y_seq'], 0)
+        y_hat = np.where(output_across_nodes['y_mask'], output_across_nodes['y_hat'], 0)
+        criteria = np.where(output_across_nodes['y_mask'], np.tile(output_across_nodes['criteria'], (self.max_followup, 1)).T, 0)
+        group_data = {k:v for k,v in output_across_nodes.items() if k in self.trainer.datamodule.group_keys}
+
+        # ensure 2D for plotting
+        y_hat = y_hat[:, np.newaxis] if y_hat.ndim == 1 else y_hat
+        y_seq = y_seq[:, np.newaxis] if y_seq.ndim == 1 else y_seq
+
+        # generate plots
+        roc_plot = self.generate_followup_roc(y_seq, y_hat, criteria)
+        print('ROC curve generated.')
+
+        subgroup_roc_plots_by_year = []
+        if group_data:
+            for year in range(self.max_followup):
+                subgroup_roc_plot = self.generate_subgroup_roc(y_seq[:, year], 
+                                                               y_hat[:, year], 
+                                                               criteria[:, year],
+                                                               group_data,
+                                                               plot_label=f'{self.trainer.datamodule.criteria}, year{year+1}')
+                subgroup_roc_plots_by_year.append(subgroup_roc_plot)
+                print(f'Subgroup ROC curve generated for year {year+1}.')
+        
+        # generate plot names
+        plot_name = f'ROC, {plot_label}, full {self.max_followup}-year followup, epoch{self.current_epoch}'
+        subgroup_plot_names_by_year = [f'ROC by subgroups, {plot_label} @year{year+1}, epoch{self.current_epoch}' 
+                                       for year in range(self.max_followup)]
+        
+        # log plots
+        if self.logger.experiment:
+            wandb_logger = self.logger
+            wandb_logger.log_image(key=plot_name, images=[roc_plot])
+            if group_data:
+                for year in range(self.max_followup):
+                    wandb_logger.log_image(key=subgroup_plot_names_by_year[year], images=[subgroup_roc_plots_by_year[year]])
+
+
+    def generate_followup_roc(self, y, y_hat, criteria):
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 8))
+        colors = cm.rainbow(np.linspace(0, 1, self.max_followup))
+
+        for year in range(self.max_followup):
+            plot_chance_level = True if year == self.max_followup - 1 else False # plot on final year
+
+            self.plot_roc_operation_point(y[:, year],
+                                        criteria[:, year],
+                                        ax=ax,
+                                        plot_label=f'{self.trainer.datamodule.criteria}, year{year+1}',
+                                        color=colors[year])
+
+
+            RocCurveDisplay.from_predictions(y[:, year],
+                                            y_hat[:, year],
+                                            name=f'year{year+1}',
+                                            plot_chance_level=plot_chance_level,
+                                            ax=ax,
+                                            color=colors[year])
+
+        ax.legend(loc='lower right', prop={'size': 8})
+        plt.close()
+
+        return fig

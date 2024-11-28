@@ -1,31 +1,6 @@
-{ "num_layers": [
-      1, 2, 3
-    ],
-    "use_bn": [
-      "True", "False"
-    ],
-    "use_data_augmentation": [
-      "True", "False"
-    ],
-    "hidden_dim": [
-      512, 256, 128
-    ],
-    "pretraining": [
-      "True", "False"
-    ],
-    "args_by_model_name": {
-      "mlp": [
-        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
-      ],
-      "linear": [
-        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
-      ],
-      "cnn": [
-        "num_layers", "use_bn", "use_data_augmentation", "hidden_dim"
-      ],
-      "resnet": [
-        "pretraining"
-      ]
-    }
+{
+  "learning_rate": [0.0006, 0.01],
+  "batch_size": [256, 100],
+  "num_epochs": [20, 50],
+  "regularization_lambda": [0]
 }
-

@@ -1,97 +1,119 @@
 
-# Predicting Lung Cancer from Low-Dose CT Scans
-#### CPH 200A Project 2
-#### Due Date: 7PM PST Nov 13, 2024
+# Designing lung cancer screening programs with machine learning
+#### CPH 200A Project 1
+#### Due Date: 7PM PST Oct 15, 2024
 
 ## Introduction
-Building on the skills you developed in Project 1, in this project you will develop deep learning tools to perform lung cancer detection, localization and risk estimation using low-dose CT scans from the National Lung Screening Trial (NLST).The goal of this project is to give you hands-on experience developing state-of-the-art neural networks and to analyze the clinical opportunities they enable. At the end of this project, you will write a short project report, describing your model and your analyses.  Submit your **project code** and a **project report** by the due date listed above. 
+
+Lung cancer screening with low-dose computed tomography significantly improves patient lung cancer outcomes, improving survival and reducing morbidity; two large randomized control lung cancer screening trials have demonstrated 20% (NLST trial) and 24% (NELSON trial) reductions in lung cancer mortality respectively. These results have motivated the  development of national lung screening programs. The success of these programs hinges on their ability to the right patients for screening, balancing the benefits early detection against the harms of overscreening. This capacity relies on our ability to estimate a patients risk of developing lung cancer. In this class project, we will develop machine learning tools to predict lung cancer risk from PLCO questionnaires, develop screening guideline simulations, and compare the cost-effectiveness of these proposed guidelines against current NLST criteria. The goal of this project is to give you hands-on experience developing machine learning tools from scratch and analyzing their clinical implications in a real world setting. At the end of this project, you will write a short project report, describing your model and your analyses.  Submit your **project code** and a **project report** by the due date.
 
 ## Part 0: Setup
 
-For a refresher on how to access the CPH App nodes, setting up your development environment, please refer to the Project 1 `README.md`]. In addition to the package requirement for project 1, make sure to install the packages listed in project 2s `requirements.txt` file.
+### Logging into CPH Department Nodes
 
-As before, you can check your installation was succesful by running `python check_installation.py` from the project 2 directory. 
 
-The NLST dataset metadata is availale at:
-`/scratch/project2/nlst-metadata/`
+You can login to the CPH Departmental nodes via ssh. The steps are: 
 
-Preprocessed NLST scans (compatabile with the included data loaders) are included at:
-`/scratch/project2/compressed/`
+``` 
+login to UCSF VPN
+ssh cph-dept-01.ucsf.edu 
+```
 
-Note, the scan's themselves are saved on local NVMe storage to accelerate your experiments IO. 
+Note, we have four CPH nodes, namely `cph-dept-[01-04]`, that are reserved for Cornerstone coursework.  You can find the class GPU allocation spreadsheet [here](https://docs.google.com/spreadsheets/d/1xLvG4LShqSgsOp2Daib21Pl7hD63JNM0lwxRExasY-g/edit?usp=drive_web&ouid=109530906639530933572).
 
-## Part 1: Build toy-cancer models with PathMNIST 
-In this part of the project, we'll leverage a toy dataset [PathMNIST](https://medmnist.com/) to introduce [PyTorch](https://pytorch.org/), [PyTorchLightning](https://lightning.ai/docs/pytorch/stable/) and [Wandb](https://wandb.ai/). With these tools, you'll train a series of increasingly complex models to tiny (`28x28 px`) pathology images and study the impact of various design choices on model performance.
+You might the following unix tools useful: [tmux](https://github.com/tmux/tmux/wiki), [htop](https://htop.dev/) and [oh-my-zsh](https://ohmyz.sh/).
 
-Note, there is a **huge** design space in neural network design, and so you may find extending your `dispatcher.py` from Project 1 to be a useful tool for managing your experiments. You may also find the starter code in `main.py`, `lightning.py` and `dataset.py` to be useful starting points for your experiments. 
+## Setting Development Environment
 
-### 1.1: Training Simple Neural Networks with PyTorch Lightning (20 pts)
+Starter project code is available in this github. You can clone this repository with the following command: 
+```
+ git clone git@github.com:yala/CPH200_24.git
+```
 
-In this exercise, develop a simple neural network to classify pathology images from the PathMNIST dataset. Develop the following models:
+To manage dependencies, we'll be using miniconda. You can install miniconda following these [instructions](https://docs.anaconda.com/miniconda/#miniconda-latest-installer-links).
 
-- Linear Model
-- MLP Model 
-- Simple CNN Model
-- ResNet-18 Model (with and without ImageNet pretraining)
+After loading `conda`, you can then create your `python3.10` environment and install the necessary python packages with the following commands:
+```
+conda create -n env_name python=3.10
+conda activate env_name
+pip install -r requirements.txt
+```
 
-In doing so, explore the impact of model depth (i.e num layers), batch normalization, data augmentation and hidden dimensions on model performance. In the context of ResNet models, explore the impact of pretraining.
+The plco datasets, which include helpful data dictionaries and readmes, are availale at:
+`/scratch/project1/plco`
 
-Your best model should be able to reach a validation accuracy of at least 99%. In your project report, include plots comparing the model variants and the impact of the design choices you explored.
+## Part 1: Model Development
 
-## Part 2: Build a cancer detection model with NLST
+In this part of the project, you will extend the starter code available in `vectorizer.py`, `logistic_regression.py` and `main.py` to develop lung cancer risk models from the PLCO data. 
 
-Now that you have experience developing deep learning models on toy datasets, it's time to apply these skills to a real world problem. In this part of the project, you will develop a deep learning model to predict lung cancer from low-dose CT scans from the National Lung Screening Trial (NLST). As before, you may find the project2 starter code helpful in getting started. Note, these experiments will be much more computationally intensive than the toy experiments in part 1, so you may find it useful to use the SGE cluster to run your experiments and to use multiple GPUs per experiment. You may also find it useful to use the `torchio` library for data augmentations.
+### Implementing a simple age-based Logistic Regression Classifier (20 pts)
+To get started, we will implement logistic regression with Stochastic Gradient Descent to predict lung cancer risk using just patient age. 
+Recall, we can define a logistic regression model as:
+$p = \sigma(\theta x + b)$
 
-### 2.1: Building cancer detection classifier (25 pts)
+where $\theta$ and $b$ refers to our model parameters, $x$ is our feature vector and $\sigma$ is the [sigmoid](https://en.wikipedia.org/wiki/Sigmoid_function) function.
 
-In this exercise, develop classifiers to predict if a patient will be diagnosed with cancer within 1 year of their CT scan. In `src/dataset.py`, you'll find the `NLST` LightningDataModule which will load a preprocessed version of the dataset where CT scans are downsampled to a resolution of `256x256x200` and stored on the fast NVME local storage.
 
-Develop a lung cancer binary classifer and explore the impact of pretraining and model architectures on model performance. In your project report, please include experiments with the following models:
+We will train out model to perform classification using the binary cross entropy loss with L2 regulazarization.
 
-- A simple 3D CNN model (extending your toy experiment)
-- A ResNet-18 model (with and without ImageNet pretraining) (adapted to 3D CT scans)
-- ResNet-3D models (with and without video pretrainig)
-- Swin-T models (with Video pretraining)
+$L(y, p) = - ( y log(p)) + (1-y)log( 1-p)) + \frac{\lambda}{2} ||\theta||^2$
 
-In addition to these experiments, please also include an exploration of why pretraining helps model performance. To what extent is the performance boost driven by feature transfer as opposed a form of optimization preconditioning?  Please design experiments to address this question and include your results in your project report.
+where $y$ is the true label, $p$ is the predicted probability, and $\lambda$ is the regularization parameter.
 
-By the end of this part of the project, your validation 1-Year AUC should be at least 0.80. 
+To complete this part of the project, you will want to extract age data (column name is `"age"`) from the PLCO csv, featurize it, and implement SGD.
+You will need to solve for the gradient of the loss with respect your model parameters. Note, pay special attention to the numerical stability of your update rule. You may also need to play with 
+the number of training steps, batch size, learning rate and regularization parameter. 
 
-### 2.2: Building a better model with localization (25 pts)
-In addition to cancer labels, our dataset also contains region annotations for each cancer CT scan. In this exercise, you will leverage this information to improve your cancer detection model.  The bounding box data and the equivalent segementation masks are loaded for you in `src/dataset.py`. 
+Your validation set ROC AUC should around `0.60`.
 
-In your project report, please:
-- Introduce your method to incorporate localization information into your model
-  -  Note, there are many valid options here!
-- Add metrics to quantify the quality of your localizations (e.g. IoU, or a likelihood metric)
-- Add vizualizations of your generated localizations against the  ground truth
+In your project report, please include a plot of your training and validation loss curves and describe the details of your model implementation.
 
-By the end of this part of the project, your validation 1-Year AUC should be at least 0.87.
+### Implementing a simple grid search dispatcher (10 pts)
 
-### 2.3: Compare to LungRads criteria and simulate possible improvements to clinical workflow (10 pts)
+A key challenge in developing effective machine learning tools is experiment management. Even for a simple model, such your logistic regression model, and a simple structured dataset (i.e PLCO) there are wide range of hyperparameters to tune. It quickly becomes intractable to identify the best model configuration by hand. In this part of the project, you will develop a small job dispatcher that will run a grid search over a set of hyperparameters. Your dispatcher should take as input a list of hyperparameters and a list of values to search over. Your dispatcher should then run a job for each combination of hyperparameters. Your dispatcher should also keep track of the results of each job and summarize the results in a convenient format.  You can find some helpful starter code in `dispatcher.py`.
 
-Now that you've developed a lung cancer detection model, it's time to analyze its clinical implications. In this exercise, you will compare your model to the LungRads criteria (which are loaded in `dataset.py`) and simulate the impact of your model on the clinical workflow. In your report, please introduce a workflow of how your model could be used to ameleorate screening and provide quantitative estimates of your workflow's impact. Be sure to study the impact of your model across various subgroups, as you did in Project 1. Finally, please include a discussion of the limitations of your analyses and subsequent studies are needed to drive these tools to impact.
+Complete the grid search dispatcher and use it to tune the hyperparameters of your age-based logistic regression model. In your project report, include a plot showing the relationship of L2 regularization and model training loss. 
 
-## Part 3: Extending your LDCT model to predict cancer risk
+### Building your best PLCO risk model (30 pts)
 
-In this part of the project, you will extend your cancer detection model to predict cancer risk and compare your results to your best model from project 1. 
+Now that you have build a simple single feature classifier, you will extend your model to include additional features from the PLCO dataset. A data dictionary from the NCI is available at `/scratch/project1/plco/dictionary_lung_prsn-aug21-091521.pdf`.
 
-### Comparing to your best model from Project 1 (note not 100% overlapping questionares) (10pts)
-Questionares from NLST are available in `src/dataset.py`. In your project report, please validate your PLCO model (from project 1) on the NLST dataset. Note, some of the information available in PLCO is not available in NLST, so you may need to simplify your project 1 model. Is there a meanigful performance difference between your PLCO model across the PLCO and NLST datasets? If so, why?
+Note, this includes a wide range of questionare features including smoking history, family history, and other demographic information. Some of this data is numeric and some is categorical, and you will need to develop an efficient way to featurize this data. Moreover, you will also need to decide how to handle missing data, and how to deal with scale of various features (e.g. age vs. pack years). For this step, you will find some hints on a suggested `vectorizer` design in `vectorizer.py`. Note, you do not need to use all the features in the questionnare.
 
-### Extend risk model to predict cancer risk (20pts)
-In this exercise, you will extend your cancer detection model to predict cancer risk. Specifically, you will predict the probability of a patient being diagnosed with cancer within `[1,2,3,4,5,6]` years of their CT scan. Note, there are many multiple ways to achieve this goal.
+Beyond a richer set of features, you will can want to consider more sophisticated models like Random Forest or Gradient Boosted Trees. You're invited to leverage the `sklearn` library for this part of the project to quickly explore other model implementations.
 
-In your project report, please include the following:
-- Your approach to extending your classifier to predict risk over time
-- Detailed performance evaluation of your risk model across multiple time horizons (e.g. 1,3 and 6 years)
-- Comparison of your imaging-based risk model against your PLCO model
-- An approach for combining your imaging-based risk model with the clinical information in your PLCO model
-  - Note, there are many valid options here!
-  - Performance evaluation of this combined model across multiple time horizons.
+At the end of this phrase, your validation ROC AUC should be greater or equal to `0.83`.
 
-Your image-based 6-year validation AUC should be at least 0.76 and your 1-year Validation should at least as good as your best detection model.
+In your project report, please including an test ROC plot of your final model, compared to your age-based model, and describe the details of your final model implementation. Please also include any interesting ablations from your model development process.
 
-### Explore clinical implications of this model (10pts)
+## Part 2: Evaluation
 
-Now that you've developed your risk model, it's time to analyze the clinical opportunities it enables. Please propose a workflow for how your model could be used to improve screening and quantify the potential impact of your workflow. Be sure to study the impact of your model across various subgroups, as you did in Project 1.  Finally, please include a discussion of the limitations of your analyses and subsequent studies are needed to drive these tools to impact.
+### Analyzing overall model performance (15 pts)
+Now that you have developed your lung cancer model, and finalized your hyper-parameters, you will now focus on evaluating the performance of your model on the test set and on various subgroups of the test set. 
+
+In your project report, include ROC curves and Precision recall curves of your best model and highlight the operation point of the current NLST criteria (available in the `"nlst_flag"` column). In addition to performance on the overall test, evaluate the performance of your model (using AUC ROC) on the following subgroups:
+
+- sex (`sex` column)
+- race (`race7` column)
+- educational status (`educat` column)
+- cigarette smoking status (`cig_stat` column)
+- NLST eligiblity (`nlst_flag` column)
+
+Are there any meaningful performance differences across these groups? What are the limitations of these analyses? What do these analyses tell us about our lung cancer risk model?
+
+### Model interpretation (5 Pts)
+In addition to overall and subgroup analyses, list the top 3 most important features in your model. Note, depending on the type of model (e.g. tree method vs logistic regression) you use, you may need to leverage different model interpretability techniques. In your report, list the most important features and describe how you identified them.
+
+### Simulating Clinical Utility (15 pts)
+ Recall that lung cancer screening guidelines must balance the early detection of lung cancer against the harms of overscreening. In this part of the project, you will simulate the clinical utility of your model by comparing the cost-effectiveness of your model against the current national screening criteria (also known as the NLST criteria as available in the `nlst_flag` column).
+
+To start off, compute the sensitivity, specificity and positive predictive value (PPV) of the NLST criteria on the PLCO test set. Note, you can use the `sklearn.metrics` library to compute these metrics.  If you were to match the specificity (i.e. amount of overscreening), sensitivity (i.e. fraction of cancer patients benefiting from early detection) or PPV (i.e. fraction of screened patients that will develop cancer) of the NLST criteria, what performance would your risk model enable?
+
+How would you choose a risk threshold for lung screening and why? Note, this a subjective choice.
+
+For your chosen risk threshold, please compute its performance metrics across the patient subgroups listed above.
+
+## Part 3: Discussion
+
+### Identifying limitations in study design (10 pts)
+In the closing section of your project report, please discuss the implications of your findings and the limitations of these analyses in shaping lung cancer screening guidelines. What is missing in these analyses? What additional studies are needed to broaden clinical screening criteria?
